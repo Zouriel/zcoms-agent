@@ -3,8 +3,8 @@ package bridge
 import (
 	"strings"
 
-	"github.com/Zouriel/zcoms/client"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
+	"github.com/Zouriel/zcoms/client"
 )
 
 // Deps are the bridge runtime's dependencies, built by the agent process from

@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/Zouriel/zcoms-agent/internal/runner"
@@ -125,26 +124,4 @@ func ensureStagingDir() (string, error) {
 		return "", err
 	}
 	return p, nil
-}
-
-// lockTriageBrain takes a blocking cross-process flock on the triage brain (the
-// same lockfile the daemon and triage component use). Returns an unlock func, or
-// nil on error (fail-open).
-func lockTriageBrain() func() {
-	dir, err := configDir()
-	if err != nil {
-		return nil
-	}
-	f, err := os.OpenFile(filepath.Join(dir, "triage-brain.lock"), os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		f.Close()
-		return nil
-	}
-	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		_ = f.Close()
-	}
 }

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 // Unified config: a single ~/.config/zcoms/config.json with one top-level
@@ -30,25 +29,6 @@ func configFilePath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, configFileName), nil
-}
-
-func lockConfig() func() {
-	dir, err := DefaultAppDir()
-	if err != nil {
-		return func() {}
-	}
-	f, err := os.OpenFile(filepath.Join(dir, "config.lock"), os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return func() {}
-	}
-	if syscall.Flock(int(f.Fd()), syscall.LOCK_EX) != nil {
-		f.Close()
-		return func() {}
-	}
-	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		_ = f.Close()
-	}
 }
 
 func readRawConfig() map[string]json.RawMessage {
