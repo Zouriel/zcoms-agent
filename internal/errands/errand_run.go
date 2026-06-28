@@ -152,7 +152,7 @@ func workerContinuePrompt(e *Errand) string {
 
 // kickErrand runs the opening turn: the approval draft, or straight into the
 // conversation when AutoStart is set.
-func (d *comp) kickErrand(e *Errand) {
+func (d *Comp) kickErrand(e *Errand) {
 	d.logErrand(e, errandLogLifecycle, "kick", "auto_start=%v status=%s", e.AutoStart, e.Status)
 	if e.AutoStart {
 		d.ensureInterviewFile(e)
@@ -164,7 +164,7 @@ func (d *comp) kickErrand(e *Errand) {
 
 // approveErrand moves a pending errand to active and opens the conversation,
 // keeping the interviewer's session (it remembers the plan it drafted).
-func (d *comp) approveErrand(e *Errand, tweak string) {
+func (d *Comp) approveErrand(e *Errand, tweak string) {
 	d.logErrand(e, errandLogLifecycle, "approved", "owner approved errand tweak=%q", strings.TrimSpace(tweak))
 	d.setErrandStatus(e, ErrandActive)
 	d.ensureInterviewFile(e)
@@ -177,7 +177,7 @@ func (d *comp) approveErrand(e *Errand, tweak string) {
 
 // feedErrand routes a contact's reply into the interviewer, logging it to the
 // transcript and buffering it if a turn is already running.
-func (d *comp) feedErrand(e *Errand, reply, mediaPath string) {
+func (d *Comp) feedErrand(e *Errand, reply, mediaPath string) {
 	d.mu.Lock()
 	e.Transcript = append(e.Transcript, "A: "+reply)
 	d.mu.Unlock()
@@ -187,7 +187,7 @@ func (d *comp) feedErrand(e *Errand, reply, mediaPath string) {
 
 // driveErrandAsync starts (or queues) a turn. If a turn for this errand is
 // already in flight, the prompt is buffered and run when the current one ends.
-func (d *comp) driveErrandAsync(e *Errand, prompt string) {
+func (d *Comp) driveErrandAsync(e *Errand, prompt string) {
 	d.mu.Lock()
 	if e.busy {
 		e.pending = append(e.pending, prompt)
@@ -205,7 +205,7 @@ func (d *comp) driveErrandAsync(e *Errand, prompt string) {
 // serialized by the errand's own mutex. It dispatches each turn to the
 // interviewer or the producer based on the current phase, and handles the
 // handoff between them.
-func (d *comp) driveErrand(e *Errand, prompt string) {
+func (d *Comp) driveErrand(e *Errand, prompt string) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("[errand %s] recovered from panic: %v\n", e.ID, r)
@@ -273,7 +273,7 @@ func (d *comp) driveErrand(e *Errand, prompt string) {
 }
 
 // errandStatus reads the status under the lock.
-func (d *comp) errandStatus(e *Errand) string {
+func (d *Comp) errandStatus(e *Errand) string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return e.Status
@@ -281,7 +281,7 @@ func (d *comp) errandStatus(e *Errand) string {
 
 // runInterviewTurn runs one interviewer turn (plan mode — no filesystem/shell)
 // and acts on its directives. Returns true when the interviewer hands off.
-func (d *comp) runInterviewTurn(e *Errand, prompt string) (handoff bool) {
+func (d *Comp) runInterviewTurn(e *Errand, prompt string) (handoff bool) {
 	backend := d.agents.For("errands", "")
 	if backend == "" {
 		d.logErrand(e, errandLogInterviewer, "failed", "no agent CLI configured")
@@ -320,7 +320,7 @@ func (d *comp) runInterviewTurn(e *Errand, prompt string) (handoff bool) {
 
 // applyInterviewDirectives parses an interviewer turn. In approval mode the
 // plain text is the plan shown to the owner. Returns whether to hand off.
-func (d *comp) applyInterviewDirectives(e *Errand, text string) (handoff bool) {
+func (d *Comp) applyInterviewDirectives(e *Errand, text string) (handoff bool) {
 	approval := d.errandStatus(e) == ErrandPendingApproval
 
 	// RECORD's content is multi-line (the whole file), so extract it as a block:
@@ -425,7 +425,7 @@ func extractRecordBlock(text string) string {
 
 // runWorkerTurn runs one producer turn (write access to its scratch dir) and
 // acts on its directives. Returns true when the errand is finished.
-func (d *comp) runWorkerTurn(e *Errand, prompt string) (done bool) {
+func (d *Comp) runWorkerTurn(e *Errand, prompt string) (done bool) {
 	backend := d.agents.For("errands", "")
 	staging, err := errandStagingDir(e.ID)
 	if err != nil {
@@ -459,7 +459,7 @@ func (d *comp) runWorkerTurn(e *Errand, prompt string) (done bool) {
 
 // applyWorkerDirectives routes a producer turn's directives. Returns whether the
 // errand finished (DONE, or FLAG/halt).
-func (d *comp) applyWorkerDirectives(e *Errand, text string) (done bool) {
+func (d *Comp) applyWorkerDirectives(e *Errand, text string) (done bool) {
 	type fileSend struct{ path, caption string }
 	var targetFiles, ownerFiles []fileSend
 	var flags []string
@@ -534,7 +534,7 @@ func (d *comp) applyWorkerDirectives(e *Errand, text string) (done bool) {
 
 // ensureInterviewFile creates the single collected-info file (once) the
 // interviewer's RECORD writes to, so it exists from spin-up.
-func (d *comp) ensureInterviewFile(e *Errand) {
+func (d *Comp) ensureInterviewFile(e *Errand) {
 	if e.InterviewFile != "" {
 		return
 	}
@@ -555,7 +555,7 @@ func (d *comp) ensureInterviewFile(e *Errand) {
 
 // writeInterviewFile overwrites the one collected-info file with the
 // interviewer's RECORD content (the daemon is the only writer of this file).
-func (d *comp) writeInterviewFile(e *Errand, content string) {
+func (d *Comp) writeInterviewFile(e *Errand, content string) {
 	d.ensureInterviewFile(e)
 	if e.InterviewFile == "" {
 		return
@@ -570,7 +570,7 @@ func (d *comp) writeInterviewFile(e *Errand, content string) {
 
 // beginProducing finalizes the interview, sends the owner the collected info,
 // and switches to the producer phase.
-func (d *comp) beginProducing(e *Errand) {
+func (d *Comp) beginProducing(e *Errand) {
 	d.logErrand(e, errandLogLifecycle, "begin_producing", "interview_file=%s", e.InterviewFile)
 	d.ensureInterviewFile(e)
 	// Fallback: if the interviewer never RECORD'd, write the raw transcript so the
@@ -602,7 +602,7 @@ func (d *comp) beginProducing(e *Errand) {
 }
 
 // errandTranscriptDoc renders the raw Q/A transcript as a fallback file body.
-func (d *comp) errandTranscriptDoc(e *Errand) string {
+func (d *Comp) errandTranscriptDoc(e *Errand) string {
 	d.mu.Lock()
 	lines := append([]string(nil), e.Transcript...)
 	d.mu.Unlock()
@@ -615,7 +615,7 @@ func (d *comp) errandTranscriptDoc(e *Errand) string {
 }
 
 // finishErrand guarantees the owner gets a file, pings them, and closes out.
-func (d *comp) finishErrand(e *Errand, summary string) {
+func (d *Comp) finishErrand(e *Errand, summary string) {
 	if !e.Delivered && e.InterviewFile != "" {
 		if err := d.deliverToOwner(e, e.InterviewFile, "Collected info"); err == nil {
 			e.Delivered = true
@@ -633,7 +633,7 @@ func (d *comp) finishErrand(e *Errand, summary string) {
 }
 
 // setErrandStatus updates and persists an errand's status under the lock.
-func (d *comp) setErrandStatus(e *Errand, status string) {
+func (d *Comp) setErrandStatus(e *Errand, status string) {
 	d.mu.Lock()
 	prev := e.Status
 	e.Status = status
@@ -644,7 +644,7 @@ func (d *comp) setErrandStatus(e *Errand, status string) {
 }
 
 // deliverToOwner sends a local file to the owner's Telegram chat.
-func (d *comp) deliverToOwner(e *Errand, path, caption string) error {
+func (d *Comp) deliverToOwner(e *Errand, path, caption string) error {
 	if _, err := os.Stat(path); err != nil {
 		return err
 	}
@@ -653,7 +653,7 @@ func (d *comp) deliverToOwner(e *Errand, path, caption string) error {
 }
 
 // sendToErrandTarget delivers a chat message to the errand's contact.
-func (d *comp) sendToErrandTarget(e *Errand, body string) error {
+func (d *Comp) sendToErrandTarget(e *Errand, body string) error {
 	if e.Source == "wa" {
 		if !d.waEnabled {
 			return fmt.Errorf("WhatsApp is disabled")
@@ -664,7 +664,7 @@ func (d *comp) sendToErrandTarget(e *Errand, body string) error {
 }
 
 // sendFileToErrandTarget uploads a local file to the errand's contact.
-func (d *comp) sendFileToErrandTarget(e *Errand, path, caption string) error {
+func (d *Comp) sendFileToErrandTarget(e *Errand, path, caption string) error {
 	if _, err := os.Stat(path); err != nil {
 		return err
 	}

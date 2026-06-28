@@ -15,7 +15,7 @@ const (
 	errandLogLifecycle   = "lifecycle"
 )
 
-func (d *comp) logErrand(e *Errand, role, event, format string, args ...any) {
+func (d *Comp) logErrand(e *Errand, role, event, format string, args ...any) {
 	if e == nil {
 		return
 	}
@@ -34,7 +34,7 @@ func (d *comp) logErrand(e *Errand, role, event, format string, args ...any) {
 	}
 }
 
-func (d *comp) errandLogPath(e *Errand, role string) (string, error) {
+func (d *Comp) errandLogPath(e *Errand, role string) (string, error) {
 	role = strings.TrimSpace(strings.ToLower(role))
 	if role == "" {
 		role = errandLogLifecycle

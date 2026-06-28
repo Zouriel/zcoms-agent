@@ -80,7 +80,7 @@ func parseReadDirectives(text string) []readRequest {
 // runTriageReads fetches the requested chats' history (the daemon owns the
 // session) and renders them into a prompt fed back to the agent so it can keep
 // reasoning and then SEND a reply.
-func (d *comp) runTriageReads(reads []readRequest) string {
+func (d *Comp) runTriageReads(reads []readRequest) string {
 	var b strings.Builder
 	b.WriteString("Here is the chat history you asked for. Use it to answer the owner ")
 	b.WriteString("or to reply via a `SEND <@username|chat_id> | message` line. You can ")
@@ -123,7 +123,7 @@ func (d *comp) runTriageReads(reads []readRequest) string {
 // scheduled triage pass uses — so the owner is talking to the agent that has
 // been triaging their messages, with full memory. It can reply to the people in
 // the last batch (by index only) on either platform.
-func (d *comp) startTriageReply(st *userState) {
+func (d *Comp) startTriageReply(st *userState) {
 	batch, err := LoadTriageBatch()
 	if err != nil {
 		d.send(st.chatID, "⚠️ Couldn't load the last triage batch: "+err.Error())
@@ -158,7 +158,7 @@ func (d *comp) startTriageReply(st *userState) {
 
 // resetTriageBrain clears the persistent triage session so the next pass starts
 // fresh with no memory of past messages.
-func (d *comp) resetTriageBrain(st *userState) {
+func (d *Comp) resetTriageBrain(st *userState) {
 	if err := ResetTriageSession(); err != nil {
 		d.send(st.chatID, "⚠️ Couldn't reset triage memory: "+err.Error())
 		return
@@ -174,7 +174,7 @@ func (d *comp) resetTriageBrain(st *userState) {
 
 // sendToRecipient sends body to one batch recipient on its origin platform and
 // returns a confirmation (or a clear error — never a false success).
-func (d *comp) sendToRecipient(rec Recipient, body string) string {
+func (d *Comp) sendToRecipient(rec Recipient, body string) string {
 	var err error
 	switch rec.Source {
 	case "wa":
@@ -220,7 +220,7 @@ func resolveStagedPath(path string) string {
 
 // sendFileTo uploads a local file to a batch recipient (by index) or to any
 // Telegram @username/chat id, returning a confirmation or a clear error.
-func (d *comp) sendFileTo(byIndex map[int]Recipient, target, path, caption string) string {
+func (d *Comp) sendFileTo(byIndex map[int]Recipient, target, path, caption string) string {
 	full := resolveStagedPath(path)
 	if _, err := os.Stat(full); err != nil {
 		return fmt.Sprintf("⚠️ Couldn't send file %q: %v", path, err)
@@ -315,7 +315,7 @@ func buildTriageSeed(recipients []Recipient) string {
 // handleTriageReplyOutput parses SEND directives out of one agent turn, routes
 // each to its recipient, strips them from the owner-facing text, and appends a
 // confirmation (or a clear error — never a false success) per send.
-func (d *comp) handleTriageReplyOutput(chatID int64, recipients []Recipient, text string) {
+func (d *Comp) handleTriageReplyOutput(chatID int64, recipients []Recipient, text string) {
 	byIndex := make(map[int]Recipient, len(recipients))
 	for _, r := range recipients {
 		byIndex[r.Index] = r

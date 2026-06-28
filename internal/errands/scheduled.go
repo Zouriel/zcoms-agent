@@ -259,7 +259,7 @@ const schedulerTick = 15 * time.Second
 // runScheduler dispatches scheduled errands whose time has come. It also catches
 // up anything that fell due while the component was down (their RunAt is already
 // in the past, so they fire on the first tick).
-func (d *comp) runScheduler() {
+func (d *Comp) runScheduler() {
 	for {
 		d.fireDueScheduled(time.Now())
 		time.Sleep(schedulerTick)
@@ -267,7 +267,7 @@ func (d *comp) runScheduler() {
 }
 
 // fireDueScheduled claims every due schedule and dispatches each outside the lock.
-func (d *comp) fireDueScheduled(now time.Time) {
+func (d *Comp) fireDueScheduled(now time.Time) {
 	for _, s := range d.claimDueScheduled(now) {
 		d.fireScheduled(s)
 	}
@@ -275,7 +275,7 @@ func (d *comp) fireDueScheduled(now time.Time) {
 
 // claimDueScheduled removes and returns every schedule whose time has come, under
 // the lock — so a slow dispatch can never let the same one fire twice.
-func (d *comp) claimDueScheduled(now time.Time) []*ScheduledErrand {
+func (d *Comp) claimDueScheduled(now time.Time) []*ScheduledErrand {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	var due []*ScheduledErrand
@@ -289,7 +289,7 @@ func (d *comp) claimDueScheduled(now time.Time) []*ScheduledErrand {
 }
 
 // fireScheduled turns one due schedule into a real errand and reports it.
-func (d *comp) fireScheduled(s *ScheduledErrand) {
+func (d *Comp) fireScheduled(s *ScheduledErrand) {
 	_ = DeleteScheduled(s.ID)
 
 	late := ""
@@ -312,7 +312,7 @@ func (d *comp) fireScheduled(s *ScheduledErrand) {
 }
 
 // scheduleErrand records a future errand and returns a confirmation line.
-func (d *comp) scheduleErrand(spec ErrandSpec, runAt time.Time) (string, error) {
+func (d *Comp) scheduleErrand(spec ErrandSpec, runAt time.Time) (string, error) {
 	if d.ownerChat == 0 {
 		return "", fmt.Errorf("no main user resolved — set main_user in agent-settings.json so I know where to report back")
 	}
@@ -348,7 +348,7 @@ func (d *comp) scheduleErrand(spec ErrandSpec, runAt time.Time) (string, error) 
 }
 
 // unschedule drops a pending scheduled errand before it fires.
-func (d *comp) unschedule(id string) bool {
+func (d *Comp) unschedule(id string) bool {
 	d.mu.Lock()
 	_, ok := d.scheduled[id]
 	if ok {
@@ -362,7 +362,7 @@ func (d *comp) unschedule(id string) bool {
 }
 
 // scheduledListText renders the pending scheduled errands, soonest first.
-func (d *comp) scheduledListText() string {
+func (d *Comp) scheduledListText() string {
 	d.mu.Lock()
 	list := make([]*ScheduledErrand, 0, len(d.scheduled))
 	for _, s := range d.scheduled {

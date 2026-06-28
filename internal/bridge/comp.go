@@ -15,9 +15,9 @@ import (
 	"github.com/Zouriel/zcoms/client"
 )
 
-// comp is the bridge component's runtime. It owns the interactive per-user
+// Comp is the bridge component's runtime. It owns the interactive per-user
 // session state and reaches Telegram through the core daemon over IPC.
-type comp struct {
+type Comp struct {
 	client        *client.Client
 	waSocket      string
 	waEnabled     bool
@@ -35,9 +35,9 @@ type comp struct {
 	byUser   map[int64]*userState
 }
 
-func (d *comp) send(chatID int64, text string) { _ = d.sendErr(chatID, text) }
+func (d *Comp) send(chatID int64, text string) { _ = d.sendErr(chatID, text) }
 
-func (d *comp) sendErr(chatID int64, text string) error {
+func (d *Comp) sendErr(chatID int64, text string) error {
 	for _, part := range chunk(text, telegramMaxLen) {
 		if _, err := d.client.Send(strconv.FormatInt(chatID, 10), part); err != nil {
 			return err
@@ -46,17 +46,17 @@ func (d *comp) sendErr(chatID int64, text string) error {
 	return nil
 }
 
-func (d *comp) sendFileTG(chatID int64, path, caption string) (string, error) {
+func (d *Comp) sendFileTG(chatID int64, path, caption string) (string, error) {
 	resp, err := d.client.SendFile(strconv.FormatInt(chatID, 10), path, caption)
 	return resp.Label, err
 }
 
-func (d *comp) resolveChat(target string) (int64, int64, error) {
+func (d *Comp) resolveChat(target string) (int64, int64, error) {
 	id, err := d.client.Resolve(target)
 	return id, id, err
 }
 
-func (d *comp) currentTriage() TriageSettings {
+func (d *Comp) currentTriage() TriageSettings {
 	if s, _, err := runner.LoadOrSeedSettings(); err == nil {
 		return s.Triage
 	}
@@ -65,7 +65,7 @@ func (d *comp) currentTriage() TriageSettings {
 
 // errandCommand forwards an `errand …` command to the errands component over
 // errands.sock and returns its reply (or a clear error string).
-func (d *comp) errandCommand(text string) string {
+func (d *Comp) errandCommand(text string) string {
 	dir, err := runner.DefaultAppDir()
 	if err != nil {
 		return "⚠️ " + err.Error()
@@ -96,7 +96,7 @@ func (d *comp) errandCommand(text string) string {
 }
 
 // handleErrandCommand relays an `errand …` bridge command to the errands component.
-func (d *comp) handleErrandCommand(st *userState, text string) {
+func (d *Comp) handleErrandCommand(st *userState, text string) {
 	d.send(st.chatID, d.errandCommand(text))
 }
 
@@ -118,7 +118,7 @@ func isTeamCommand(lower string) bool {
 // handleTeamCommand forwards a message to the team component over team.sock and
 // relays the reply, staying in a "team session" while the component asks for more
 // (multi-turn flows like add/new/finish task).
-func (d *comp) handleTeamCommand(st *userState, text string) {
+func (d *Comp) handleTeamCommand(st *userState, text string) {
 	dir, err := runner.DefaultAppDir()
 	if err != nil {
 		d.send(st.chatID, "⚠️ "+err.Error())
@@ -157,7 +157,7 @@ func (d *comp) handleTeamCommand(st *userState, text string) {
 	d.send(st.chatID, resp.Reply)
 }
 
-func (d *comp) setTeamSession(st *userState, on bool) {
+func (d *Comp) setTeamSession(st *userState, on bool) {
 	d.mu.Lock()
 	st.teamSession = on
 	d.mu.Unlock()
@@ -172,7 +172,7 @@ func isCommerceCommand(lower string) bool {
 // handleCommerceCommand forwards a `commerce …` message to the commerce
 // component over commerce.sock and relays the reply. Unlike team, commerce is
 // stateless — one request, one response.
-func (d *comp) handleCommerceCommand(st *userState, text string) {
+func (d *Comp) handleCommerceCommand(st *userState, text string) {
 	// Strip the leading "commerce" so the component sees its own subcommand
 	// (e.g. "commerce store list" -> "store list"), matching the CLI which
 	// passes only the args after `zc commerce`.

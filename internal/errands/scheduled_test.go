@@ -154,10 +154,10 @@ func TestHumanDuration(t *testing.T) {
 	}
 }
 
-func newTestComp(t *testing.T) *comp {
+func newTestComp(t *testing.T) *Comp {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // isolate ~/.config/zcoms persistence
-	return &comp{
+	return &Comp{
 		ownerChat: 12345,
 		errands:   map[string]*Errand{},
 		scheduled: map[string]*ScheduledErrand{},

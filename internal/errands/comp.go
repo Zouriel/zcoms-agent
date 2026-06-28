@@ -14,10 +14,10 @@ import (
 	"github.com/Zouriel/zcoms/client"
 )
 
-// comp is the errands component's runtime: it owns the errand state and reaches
+// Comp is the errands component's runtime: it owns the errand state and reaches
 // Telegram through the core daemon over IPC and WhatsApp through the sidecar.
 // It replaces the in-daemon receiver the ported errand logic was written against.
-type comp struct {
+type Comp struct {
 	client    *client.Client
 	waSocket  string
 	waEnabled bool
@@ -34,19 +34,19 @@ type comp struct {
 
 func itoa(id int64) string { return strconv.FormatInt(id, 10) }
 
-func (d *comp) send(chatID int64, text string) { _ = d.sendErr(chatID, text) }
+func (d *Comp) send(chatID int64, text string) { _ = d.sendErr(chatID, text) }
 
-func (d *comp) sendErr(chatID int64, text string) error {
+func (d *Comp) sendErr(chatID int64, text string) error {
 	_, err := d.client.Send(itoa(chatID), text)
 	return err
 }
 
-func (d *comp) sendFile(chatID int64, path, caption string) error {
+func (d *Comp) sendFile(chatID int64, path, caption string) error {
 	_, err := d.client.SendFile(itoa(chatID), path, caption)
 	return err
 }
 
-func (d *comp) resolveChat(target string) (int64, int64, error) {
+func (d *Comp) resolveChat(target string) (int64, int64, error) {
 	id, err := d.client.Resolve(target)
 	return id, id, err
 }
@@ -55,7 +55,7 @@ func (d *comp) resolveChat(target string) (int64, int64, error) {
 
 // syncClaims writes claims.json from the currently-active errands so the daemon
 // routes those chats here and triage skips them.
-func (d *comp) syncClaims() {
+func (d *Comp) syncClaims() {
 	d.mu.Lock()
 	var c runner.Claims
 	for _, e := range d.errands {
@@ -85,7 +85,7 @@ type ErrandSpec struct {
 	AutoStart       bool
 }
 
-func (d *comp) startErrand(spec ErrandSpec) (string, error) {
+func (d *Comp) startErrand(spec ErrandSpec) (string, error) {
 	if d.ownerChat == 0 {
 		return "", fmt.Errorf("no main user resolved — set main_user in agent-settings.json so I know where to report back")
 	}
@@ -126,7 +126,7 @@ func (d *comp) startErrand(spec ErrandSpec) (string, error) {
 	return fmt.Sprintf("🗂 Errand %s → %s (%s). %s.", e.ID, e.TargetName, e.platform(), verb), nil
 }
 
-func (d *comp) resolveErrandTarget(e *Errand, target string) error {
+func (d *Comp) resolveErrandTarget(e *Errand, target string) error {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return fmt.Errorf("an errand needs a target contact")
@@ -177,7 +177,7 @@ func normalizeWAJID(target string) string {
 	return target + "@s.whatsapp.net"
 }
 
-func (d *comp) errandContextFiles(e *Errand) []string {
+func (d *Comp) errandContextFiles(e *Errand) []string {
 	if e.Source != "wa" || strings.TrimSpace(e.WAChat) == "" {
 		return nil
 	}
@@ -235,7 +235,7 @@ func waBufferedFiles(jid string) []string {
 	return files
 }
 
-func (d *comp) pendingErrand(id string) *Errand {
+func (d *Comp) pendingErrand(id string) *Errand {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	var match *Errand
@@ -256,7 +256,7 @@ func (d *comp) pendingErrand(id string) *Errand {
 	return nil
 }
 
-func (d *comp) cancelErrand(id string) (*Errand, bool) {
+func (d *Comp) cancelErrand(id string) (*Errand, bool) {
 	d.mu.Lock()
 	e, ok := d.errands[id]
 	if ok {
@@ -271,20 +271,20 @@ func (d *comp) cancelErrand(id string) (*Errand, bool) {
 	return e, ok
 }
 
-func (d *comp) errandExists(id string) bool {
+func (d *Comp) errandExists(id string) bool {
 	d.mu.Lock()
 	_, ok := d.errands[id]
 	d.mu.Unlock()
 	return ok
 }
 
-func (d *comp) reviseErrandPlan(e *Errand, changes string) {
+func (d *Comp) reviseErrandPlan(e *Errand, changes string) {
 	prompt := fmt.Sprintf("The owner wants these changes before you start: %s\n\n%s",
 		strings.TrimSpace(changes), errandApprovalPrompt(e))
 	d.driveErrandAsync(e, prompt)
 }
 
-func (d *comp) errandListText() string {
+func (d *Comp) errandListText() string {
 	d.mu.Lock()
 	var active []*Errand
 	for _, e := range d.errands {
@@ -336,7 +336,7 @@ func parseErrandStart(s string) (ErrandSpec, error) {
 // handleErrandCommand parses an "errand …" command and performs it, returning
 // the immediate reply for whoever issued it (the CLI or the bridge owner).
 // Long-running progress is sent to the owner via d.send.
-func (d *comp) handleErrandCommand(text string) string {
+func (d *Comp) handleErrandCommand(text string) string {
 	fields := strings.Fields(text)
 	if len(fields) < 2 {
 		return d.errandListText() + "\n\nCommands: errand list · errand start [deliver] [go] <@user|wa:JID|#index> | <brief> · errand schedule [deliver] [go] <target> at <time> | <brief> · errand scheduled · errand unschedule <id> · errand yes [id] · errand no [id] · errand edit [id] <changes> · errand cancel <id>"

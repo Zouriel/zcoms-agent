@@ -44,7 +44,7 @@ type userState struct {
 // messages until interrupted.
 // dispatchUpdate handles one incoming TDLib update. It runs under a recover so a
 // panic parsing untrusted message JSON can never crash the daemon's receive loop.
-func (d *comp) handle(st *userState, text string) {
+func (d *Comp) handle(st *userState, text string) {
 	if text == "" {
 		return
 	}
@@ -165,7 +165,7 @@ func (d *comp) handle(st *userState, text string) {
 	d.dispatchAgentTurn(st, text)
 }
 
-func (d *comp) listLocations(st *userState) {
+func (d *Comp) listLocations(st *userState) {
 	// Reload so `zc locations add/remove` applies without a daemon restart.
 	if locs, _, err := LoadOrSeedLocations(); err == nil {
 		d.locations = locs
@@ -198,7 +198,7 @@ func (d *comp) listLocations(st *userState) {
 	d.send(st.chatID, b.String())
 }
 
-func (d *comp) listSessions(st *userState) {
+func (d *Comp) listSessions(st *userState) {
 	d.mu.Lock()
 	loc, path := st.location, st.locationPath
 	d.mu.Unlock()
@@ -228,7 +228,7 @@ func (d *comp) listSessions(st *userState) {
 	d.send(st.chatID, b.String())
 }
 
-func (d *comp) selectNumber(st *userState, n int) {
+func (d *Comp) selectNumber(st *userState, n int) {
 	// Snapshot the pending menu under the lock so the range-check and indexing
 	// below can't race a concurrent listLocations/listSessions reassigning them.
 	d.mu.Lock()
@@ -279,7 +279,7 @@ func (d *comp) selectNumber(st *userState, n int) {
 // session with no directive protocol — it can create/edit files, run commands,
 // SSH into servers, etc. A context seed (first turn) tells it the owner's
 // Telegram/WhatsApp are already wired through this tool. Resumes until `new`/`end`.
-func (d *comp) startChat(st *userState) {
+func (d *Comp) startChat(st *userState) {
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		home = d.currentTriage().Dir // sensible fallback
@@ -345,7 +345,7 @@ func buildChatSeed() string {
 	}, "\n")
 }
 
-func (d *comp) startNew(st *userState) {
+func (d *Comp) startNew(st *userState) {
 	d.mu.Lock()
 	loc := st.location
 	st.sessionID, st.pendingKind, st.awaitingConfirm = "", "", false
@@ -362,7 +362,7 @@ func (d *comp) startNew(st *userState) {
 // user is asked to approve before anything executes.
 // runAgent starts one agent turn in the background and returns whether it
 // started (false only when a run is already in flight).
-func (d *comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAfter bool) bool {
+func (d *Comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAfter bool) bool {
 	d.mu.Lock()
 	if st.busy {
 		d.mu.Unlock()
@@ -509,7 +509,7 @@ func (d *comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAft
 	return true
 }
 
-func (d *comp) statusLine(st *userState) string {
+func (d *Comp) statusLine(st *userState) string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	loc := st.location
@@ -527,7 +527,7 @@ func (d *comp) statusLine(st *userState) string {
 	return fmt.Sprintf("Role: %s\nLocation: %s\nSession: %s", role, loc, sess)
 }
 
-func (d *comp) helpText(st *userState) string {
+func (d *Comp) helpText(st *userState) string {
 	return strings.Join([]string{
 		"🤖 Agent bridge — commands:",
 		"  locations — pick a project to work in",

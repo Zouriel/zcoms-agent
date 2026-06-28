@@ -1,0 +1,12 @@
+[Unit]
+Description=zcoms agent (AI layer: bridge + triage + errands)
+After=zcoms-daemon.service
+Requires=zcoms-daemon.service
+
+[Service]
+ExecStart=%h/.local/bin/zcoms-agent
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

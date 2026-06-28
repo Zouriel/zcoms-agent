@@ -57,7 +57,7 @@ const perQuestionWait = 30 * time.Minute
 // runInterview conducts a scripted standup interview over Telegram (the daemon
 // routes the claimed chat's replies to us) and posts the structured result back
 // to the team component. Telegram targets only (standup staff use @usernames).
-func (d *comp) runInterview(spec InterviewSpec) {
+func (d *Comp) runInterview(spec InterviewSpec) {
 	chatID, err := d.client.Resolve(spec.Target)
 	if err != nil {
 		log.Printf("[interview] couldn't resolve %s: %v", spec.Target, err)
@@ -100,7 +100,7 @@ func (d *comp) runInterview(spec InterviewSpec) {
 }
 
 // feedInterview delivers a contact reply to an active interview (non-blocking).
-func (d *comp) feedInterview(chatID int64, text string) bool {
+func (d *Comp) feedInterview(chatID int64, text string) bool {
 	d.mu.Lock()
 	iv := d.interviews[chatID]
 	d.mu.Unlock()
@@ -115,7 +115,7 @@ func (d *comp) feedInterview(chatID int64, text string) bool {
 }
 
 // postResult sends the collected answers back to the team component's socket.
-func (d *comp) postResult(spec InterviewSpec, answers []InterviewAnswer) {
+func (d *Comp) postResult(spec InterviewSpec, answers []InterviewAnswer) {
 	dir, err := runner.DefaultAppDir()
 	if err != nil {
 		return

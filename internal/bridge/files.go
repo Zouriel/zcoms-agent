@@ -14,7 +14,7 @@ const uploadsSubdir = "zcoms-uploads"
 // handleIncomingFile saves a file an allow-listed user sent (already downloaded
 // by the daemon to localPath) into the active project and remembers it, so it's
 // attached to the user's next turn (or run now if there's a caption).
-func (d *comp) handleIncomingFile(st *userState, localPath, fileName, caption string) {
+func (d *Comp) handleIncomingFile(st *userState, localPath, fileName, caption string) {
 	d.mu.Lock()
 	loc, dir, chatID := st.location, st.locationPath, st.chatID
 	d.mu.Unlock()
@@ -50,7 +50,7 @@ func (d *comp) handleIncomingFile(st *userState, localPath, fileName, caption st
 
 // dispatchAgentTurn runs a message through the agent with confirm-aware routing
 // (plan-first for the confirm role), attaching any files sent since the last turn.
-func (d *comp) dispatchAgentTurn(st *userState, text string) {
+func (d *Comp) dispatchAgentTurn(st *userState, text string) {
 	d.mu.Lock()
 	role := st.effectiveRole
 	files := st.pendingFiles
