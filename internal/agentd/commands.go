@@ -1,6 +1,7 @@
 package agentd
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -38,9 +39,51 @@ func (a *Agent) dispatch(text string) (string, error) {
 		return a.triageCmd(rest)
 	case "settings", "setting":
 		return a.settingsCmd(rest)
+	case "json":
+		return a.jsonQuery(rest)
 	default:
 		return "", fmt.Errorf("unknown command %q", verb)
 	}
+}
+
+// jsonQuery returns a table's rows as JSON in the reply, for structured callers
+// (the console). Still goes through the store — the console never opens agent.db.
+func (a *Agent) jsonQuery(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("usage: json workspaces|personas|allowlist|settings|sessions <…>")
+	}
+	var v any
+	var err error
+	switch args[0] {
+	case "workspaces":
+		v, err = a.Store.ListWorkspaces(true)
+	case "personas":
+		v, err = a.Store.ListPersonas()
+	case "allowlist":
+		v, err = a.Store.ListAllow()
+	case "settings":
+		v, err = a.Store.ListSettings()
+	case "sessions":
+		if len(args) < 2 {
+			return "", fmt.Errorf("usage: json sessions <workspace-id>")
+		}
+		id, perr := strconv.ParseInt(args[1], 10, 64)
+		if perr != nil {
+			return "", perr
+		}
+		ws, gerr := a.Store.GetWorkspace(id)
+		if gerr != nil {
+			return "", gerr
+		}
+		v, err = a.Sessions.List(ws, "claude", 25)
+	default:
+		return "", fmt.Errorf("unknown table %q", args[0])
+	}
+	if err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(v)
+	return string(b), err
 }
 
 func (a *Agent) settingsCmd(args []string) (string, error) {
