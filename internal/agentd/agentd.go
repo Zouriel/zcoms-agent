@@ -19,7 +19,7 @@ import (
 	"github.com/Zouriel/zcoms-agent/internal/bridge"
 	"github.com/Zouriel/zcoms-agent/internal/errands"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
-	"github.com/Zouriel/zcoms-agent/internal/scheduler"
+	"github.com/Zouriel/zcoms-agent/scheduler"
 	"github.com/Zouriel/zcoms-agent/internal/sessions"
 	"github.com/Zouriel/zcoms-agent/internal/store"
 	"github.com/Zouriel/zcoms-agent/internal/triage"
