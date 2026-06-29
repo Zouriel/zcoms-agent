@@ -57,6 +57,30 @@ func TestStateForWhatsApp(t *testing.T) {
 	}
 }
 
+// SetAllow takes effect live: a new allowlist that drops a principal evicts
+// their active session so they're no longer served without a restart.
+func TestSetAllowEvictsRemoved(t *testing.T) {
+	d := testComp()
+	jid := "9607654321@s.whatsapp.net"
+	if d.stateFor(client.Event{Transport: "whatsapp", Address: jid}) == nil {
+		t.Fatal("setup: allow-listed WA sender should get a session")
+	}
+
+	// Remove WhatsApp from the allowlist and push it live.
+	d.SetAllow(Allowlist{"telegram|@alice": {Role: RoleRead}})
+
+	// The evicted number is no longer served (existing session dropped, and a
+	// fresh lookup fails).
+	if d.stateFor(client.Event{Transport: "whatsapp", Address: jid}) != nil {
+		t.Fatal("removed WhatsApp number still served after SetAllow")
+	}
+	// An added principal works immediately.
+	d.SetAllow(Allowlist{"telegram|@alice": {Role: RoleRead}, "whatsapp|9607654321": {Role: RoleRead}})
+	if d.stateFor(client.Event{Transport: "whatsapp", Address: jid}) == nil {
+		t.Fatal("re-added WhatsApp number not served after SetAllow")
+	}
+}
+
 func TestSessionKeyNamespacesTransports(t *testing.T) {
 	if sessionKey("telegram", "123") == sessionKey("whatsapp", "123") {
 		t.Fatal("telegram and whatsapp ids must not collide")

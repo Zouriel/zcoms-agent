@@ -125,3 +125,20 @@ func (d *Comp) lookupAllow(platform, sender string) (string, AllowEntry, bool) {
 	}
 	return handle, e, true
 }
+
+// SetAllow swaps in a freshly-built allowlist (after an owner add/remove) so the
+// change takes effect live with no restart. It also evicts any active session
+// whose principal is no longer allow-listed — otherwise an existing session
+// would keep being served, since stateFor reuses a session without re-checking
+// the allowlist. d.allow is only ever read inside stateFor under d.mu, so the
+// swap is race-free.
+func (d *Comp) SetAllow(allow Allowlist) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.allow = allow
+	for key, st := range d.byUser {
+		if _, ok := allow[AllowKey(st.transport, st.username)]; !ok {
+			delete(d.byUser, key)
+		}
+	}
+}

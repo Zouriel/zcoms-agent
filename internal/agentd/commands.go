@@ -339,6 +339,9 @@ func (a *Agent) allowlistCmd(args []string) (string, error) {
 		}
 		handle := runner.NormalizeAllowHandle(platform, strings.Join(rest, " "))
 		_, err := a.Store.CreateAllow(store.Owner, store.AllowEntry{Platform: platform, Handle: handle, MaxRole: role})
+		if err == nil {
+			a.reloadAllow()
+		}
 		return "Added.", err
 	case "rm", "remove":
 		if len(args) < 2 {
@@ -348,7 +351,11 @@ func (a *Agent) allowlistCmd(args []string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return "Removed.", a.Store.DeleteAllow(store.Owner, id)
+		if err := a.Store.DeleteAllow(store.Owner, id); err != nil {
+			return "", err
+		}
+		a.reloadAllow()
+		return "Removed.", nil
 	default:
 		return "", fmt.Errorf("usage: allowlist add|rm|list")
 	}

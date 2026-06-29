@@ -156,6 +156,19 @@ func (a *Agent) registerJobs() {
 	a.Sched.Interval("workspace-discovery", 10*time.Minute, func() { _, _ = a.Registry.Sync() })
 }
 
+// reloadAllow rebuilds the allowlist from agent.db and pushes it into the live
+// bridge, so an add/remove (CLI or console) takes effect immediately — no restart.
+func (a *Agent) reloadAllow() {
+	allow, err := a.buildAllow()
+	if err != nil {
+		a.log.Printf("allowlist reload: %v", err)
+		return
+	}
+	if a.Bridge != nil {
+		a.Bridge.SetAllow(allow)
+	}
+}
+
 // transportOf returns the event's transport, defaulting to telegram for a
 // pre-v2 daemon that doesn't tag events.
 func transportOf(ev client.Event) string {
