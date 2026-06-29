@@ -115,7 +115,11 @@ func (a *Agent) settingsCmd(args []string) (string, error) {
 		if len(args) < 3 {
 			return "", fmt.Errorf("usage: settings set <key> <value…>")
 		}
-		return "Set.", a.Store.SetSetting(store.Owner, args[1], strings.Join(args[2:], " "))
+		if err := a.Store.SetSetting(store.Owner, args[1], strings.Join(args[2:], " ")); err != nil {
+			return "", err
+		}
+		a.reloadSettings()
+		return "Set.", nil
 	default:
 		return "", fmt.Errorf("usage: settings list|get|set")
 	}

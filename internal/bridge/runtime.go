@@ -128,6 +128,15 @@ func (d *Comp) lookupAllow(platform, sender string) (string, AllowEntry, bool) {
 	return handle, e, true
 }
 
+// SetSettings swaps in freshly-built settings (after an owner change) so toggles
+// like auto-reply take effect live with no restart. d.settings is read under
+// d.mu (maybeAutoReply / currentTriage), so the swap is race-free.
+func (d *Comp) SetSettings(s Settings) {
+	d.mu.Lock()
+	d.settings = s
+	d.mu.Unlock()
+}
+
 // maybeAutoReply sends the canned acknowledgement to a non-allow-listed sender
 // when auto-reply is enabled — once per sender per session, so someone who keeps
 // messaging isn't spammed. The owner is informed about the message separately by

@@ -107,6 +107,8 @@ func (d *Comp) currentTriage() TriageSettings {
 	if s, _, err := runner.LoadOrSeedSettings(); err == nil {
 		return s.Triage
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	return d.settings.Triage
 }
 

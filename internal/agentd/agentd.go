@@ -169,6 +169,21 @@ func (a *Agent) reloadAllow() {
 	}
 }
 
+// reloadSettings rebuilds settings from agent.db and pushes them into the live
+// bridge, so a settings change (e.g. toggling auto-reply or editing its text in
+// the console) takes effect immediately — no restart.
+func (a *Agent) reloadSettings() {
+	settings, err := a.buildSettings()
+	if err != nil {
+		a.log.Printf("settings reload: %v", err)
+		return
+	}
+	a.settings = settings
+	if a.Bridge != nil {
+		a.Bridge.SetSettings(settings)
+	}
+}
+
 // transportOf returns the event's transport, defaulting to telegram for a
 // pre-v2 daemon that doesn't tag events.
 func transportOf(ev client.Event) string {
