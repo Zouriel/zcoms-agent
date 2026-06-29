@@ -4,18 +4,17 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Zouriel/zcoms/client"
-	"github.com/Zouriel/zcoms/whatsapp"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
+	"github.com/Zouriel/zcoms/client"
 )
 
 // New builds the errands runtime for the unified agent process. The agent owns
 // one harness connection and routes events in; errands no longer subscribes on
-// its own (that was the standalone component's job).
-func New(c *client.Client, waSocket string, waEnabled bool, agents runner.AgentConfig, ownerChat int64, personaSeed func(key string) string) *Comp {
+// its own (that was the standalone component's job). WhatsApp goes through the
+// daemon's in-process transport — no sidecar.
+func New(c *client.Client, waEnabled bool, agents runner.AgentConfig, ownerChat int64, personaSeed func(key string) string) *Comp {
 	d := &Comp{
 		client:      c,
-		waSocket:    waSocket,
 		waEnabled:   waEnabled,
 		agents:      agents,
 		personaSeed: personaSeed,
@@ -91,7 +90,7 @@ func (d *Comp) Owns(chatID int64) bool {
 }
 
 // OwnsWA reports whether an active errand claims a WhatsApp chat (jid), so the
-// agent's WA poll routes that message to errands instead of the bridge.
+// agent's event router sends that message to errands instead of the bridge.
 func (d *Comp) OwnsWA(jid string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -103,8 +102,28 @@ func (d *Comp) OwnsWA(jid string) bool {
 	return false
 }
 
-// PollWhatsApp runs one WhatsApp reply-poll pass (driven by the scheduler).
-func (d *Comp) PollWhatsApp() { d.pollWAOnce() }
+// FeedWhatsApp feeds an incoming WhatsApp reply (from the daemon subscribe
+// stream) into a matching active errand and clears it from the daemon's unread
+// so triage doesn't also digest a message the errand consumed. Returns true when
+// an errand owns the jid (so the router doesn't fall through to the bridge).
+func (d *Comp) FeedWhatsApp(jid, msgRef, text, file string) bool {
+	e := d.activeErrandForWA(jid)
+	if e == nil {
+		return false
+	}
+	d.mu.Lock()
+	fresh := e.markSeen(msgRef)
+	d.mu.Unlock()
+	if msgRef != "" {
+		_ = d.client.MarkReadOn("whatsapp", jid, []string{msgRef})
+	}
+	if !fresh || !e.interviewing() {
+		return true
+	}
+	_ = SaveErrand(e)
+	d.feedErrand(e, text, file)
+	return true
+}
 
 // FireDueScheduled fires any scheduled errands now due (driven by the scheduler).
 func (d *Comp) FireDueScheduled() { d.fireDueScheduled(time.Now()) }
@@ -131,45 +150,4 @@ func (d *Comp) activeErrandForWA(jid string) *Errand {
 		}
 	}
 	return nil
-}
-
-func (d *Comp) hasActiveWAErrand() bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for _, e := range d.errands {
-		if e.Source == "wa" && e.active() {
-			return true
-		}
-	}
-	return false
-}
-
-// pollWAOnce does a single WhatsApp reply-poll pass for active WA errands.
-func (d *Comp) pollWAOnce() {
-	if !d.waEnabled || !d.hasActiveWAErrand() {
-		return
-	}
-	unread, err := whatsapp.FetchUnread(d.waSocket)
-	if err != nil {
-		return
-	}
-	handled := map[string][]string{}
-	for _, u := range unread {
-		e := d.activeErrandForWA(u.ChatID)
-		if e == nil {
-			continue
-		}
-		d.mu.Lock()
-		fresh := e.markSeen(u.MsgID)
-		d.mu.Unlock()
-		handled[u.ChatID] = append(handled[u.ChatID], u.MsgID)
-		if !fresh || !e.interviewing() {
-			continue
-		}
-		_ = SaveErrand(e)
-		d.feedErrand(e, u.Text, u.File)
-	}
-	for jid, ids := range handled {
-		_ = whatsapp.Dismiss(d.waSocket, jid, ids)
-	}
 }

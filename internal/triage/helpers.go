@@ -44,4 +44,3 @@ func humanAgo(t time.Time) string {
 		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	}
 }
-

@@ -12,7 +12,6 @@ import (
 // agent.db (allowlist, workspaces→locations, persona backends, settings).
 type Deps struct {
 	Client     *client.Client
-	WASocket   string
 	WAEnabled  bool
 	Locations  runner.Locations
 	Allow      runner.Allowlist
@@ -28,7 +27,6 @@ type Deps struct {
 func New(d Deps) *Comp {
 	return &Comp{
 		client:           d.Client,
-		waSocket:         d.WASocket,
 		waEnabled:        d.WAEnabled,
 		bridgeBackend:    d.Agents.For("bridge", ""),
 		chatBackend:      d.Agents.For("chat", ""),
@@ -93,8 +91,7 @@ func (d *Comp) stateFor(ev client.Event) *userState {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if st, ok := d.byUser[key]; ok {
-		st.address = address  // refresh reply target
-		st.viaSidecar = false // arrived over the daemon, not the legacy sidecar
+		st.address = address // refresh reply target
 		return st
 	}
 	handle, entry, ok := d.lookupAllow(tp, matchHandle)

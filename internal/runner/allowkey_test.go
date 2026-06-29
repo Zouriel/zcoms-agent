@@ -4,10 +4,10 @@ import "testing"
 
 func TestAllowKeyMatching(t *testing.T) {
 	cases := []struct{ platform, stored, inbound string }{
-		{"telegram", "@ZourielCorbet", "@zourielcorbet"}, // case-insensitive
-		{"telegram", "ali", "@ali"},                      // stored bare, inbound @-form
+		{"telegram", "@ZourielCorbet", "@zourielcorbet"},           // case-insensitive
+		{"telegram", "ali", "@ali"},                                // stored bare, inbound @-form
 		{"whatsapp", "+960 765-4321", "9607654321@s.whatsapp.net"}, // number vs jid
-		{"whatsapp", "9607654321", "+9607654321"},                 // digits vs +form
+		{"whatsapp", "9607654321", "+9607654321"},                  // digits vs +form
 	}
 	for _, c := range cases {
 		if k1, k2 := AllowKey(c.platform, c.stored), AllowKey(c.platform, c.inbound); k1 != k2 {

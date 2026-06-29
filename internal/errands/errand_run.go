@@ -9,7 +9,6 @@ import (
 
 	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
-	"github.com/Zouriel/zcoms/whatsapp"
 )
 
 // errandDirective matches one content-bearing action line. Which directives are
@@ -659,7 +658,8 @@ func (d *Comp) sendToErrandTarget(e *Errand, body string) error {
 		if !d.waEnabled {
 			return fmt.Errorf("WhatsApp is disabled")
 		}
-		return whatsapp.Send(d.waSocket, e.WAChat, body)
+		_, err := d.client.SendOn("whatsapp", e.WAChat, body)
+		return err
 	}
 	return d.sendErr(e.TGChat, body)
 }
@@ -673,7 +673,8 @@ func (d *Comp) sendFileToErrandTarget(e *Errand, path, caption string) error {
 		if !d.waEnabled {
 			return fmt.Errorf("WhatsApp is disabled")
 		}
-		return whatsapp.SendFile(d.waSocket, e.WAChat, path, caption)
+		_, err := d.client.SendFileOn("whatsapp", e.WAChat, path, caption)
+		return err
 	}
 	err := d.sendFile(e.TGChat, path, caption)
 	return err

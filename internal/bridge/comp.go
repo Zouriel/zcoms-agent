@@ -13,14 +13,12 @@ import (
 
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms/client"
-	"github.com/Zouriel/zcoms/whatsapp"
 )
 
 // Comp is the bridge component's runtime. It owns the interactive per-user
 // session state and reaches Telegram through the core daemon over IPC.
 type Comp struct {
 	client           *client.Client
-	waSocket         string
 	waEnabled        bool
 	bridgeBackend    Backend
 	chatBackend      Backend
@@ -40,19 +38,22 @@ type Comp struct {
 
 // route is a snapshot of where a session's replies go. It is taken by value
 // (st.route()) before any goroutine so an in-flight reply can't race a later
-// inbound that mutates the session's address. The bridge routes every reply
-// through this: legacy Baileys WhatsApp over the sidecar, everything else over
-// the comms daemon on the message's own transport.
+// inbound that mutates the session's address. Every reply goes through the comms
+// daemon on the message's own transport.
 type route struct {
-	transport  string // "telegram" | "whatsapp" | "instagram"
-	address    string // transport-native reply id (chat id string / JID / thread id)
-	viaSidecar bool   // legacy Node Baileys WhatsApp (reply over the sidecar, not the daemon)
+	transport string // "telegram" | "whatsapp" | "instagram"
+	address   string // transport-native reply id (chat id string / JID / thread id)
 }
 
 // tgRoute builds a Telegram route from a numeric chat id (for fan-out sends that
 // resolve an @handle → chat id, e.g. triage replies).
 func tgRoute(chatID int64) route {
 	return route{transport: "telegram", address: strconv.FormatInt(chatID, 10)}
+}
+
+// waRoute builds a WhatsApp route from a JID (for triage replies to a WA recipient).
+func waRoute(jid string) route {
+	return route{transport: "whatsapp", address: jid}
 }
 
 // seed returns a persona's owner-editable seed prompt, or "" when no accessor is
@@ -67,14 +68,11 @@ func (d *Comp) seed(key string) string {
 func (d *Comp) send(r route, text string) { _ = d.sendErr(r, text) }
 
 // sendErr posts text on the route's transport, splitting over the length limit.
-// Telegram and any daemon transport go through the comms client (Send/SendOn);
-// a legacy Baileys WhatsApp session replies over the sidecar.
+// Everything goes through the comms daemon (Send for Telegram, SendOn otherwise).
 func (d *Comp) sendErr(r route, text string) error {
 	for _, part := range chunk(text, telegramMaxLen) {
 		var err error
 		switch {
-		case r.viaSidecar:
-			err = whatsapp.Send(d.waSocket, r.address, part)
 		case r.transport == "" || r.transport == "telegram":
 			_, err = d.client.Send(r.address, part)
 		default:
@@ -87,12 +85,9 @@ func (d *Comp) sendErr(r route, text string) error {
 	return nil
 }
 
-// sendFile uploads a file on the route's transport, returning the daemon's label
-// (empty for the sidecar path).
+// sendFile uploads a file on the route's transport, returning the daemon's label.
 func (d *Comp) sendFile(r route, path, caption string) (string, error) {
 	switch {
-	case r.viaSidecar:
-		return "", whatsapp.SendFile(d.waSocket, r.address, path, caption)
 	case r.transport == "" || r.transport == "telegram":
 		resp, err := d.client.SendFile(r.address, path, caption)
 		return resp.Label, err

@@ -21,11 +21,9 @@ type userState struct {
 	// native address, so a message on any connected app is answered on that same
 	// app. transport is "telegram" | "whatsapp" | "instagram"; address is the
 	// transport-native reply id (Telegram chat id string / WhatsApp JID / IG
-	// thread id); viaSidecar marks a legacy Baileys WhatsApp session whose
-	// replies go over the Node sidecar rather than the comms daemon.
-	transport  string
-	address    string
-	viaSidecar bool
+	// thread id).
+	transport string
+	address   string
 
 	location      string // active location name ("" = none picked)
 	locationPath  string
@@ -53,7 +51,7 @@ type userState struct {
 
 // route snapshots the session's reply destination (taken before any goroutine).
 func (st *userState) route() route {
-	return route{transport: st.transport, address: st.address, viaSidecar: st.viaSidecar}
+	return route{transport: st.transport, address: st.address}
 }
 
 // sessionKey is the byUser map key: one session per (transport, native id) so

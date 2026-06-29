@@ -27,7 +27,7 @@ func TestStateForTelegram(t *testing.T) {
 	if st.transport != "telegram" || st.address != "42" {
 		t.Fatalf("telegram session route wrong: %+v", st.route())
 	}
-	if r := st.route(); r.viaSidecar || r.transport != "telegram" || r.address != "42" {
+	if r := st.route(); r.transport != "telegram" || r.address != "42" {
 		t.Fatalf("route() wrong: %+v", r)
 	}
 	// Non-allow-listed sender is rejected.
@@ -45,31 +45,15 @@ func TestStateForWhatsApp(t *testing.T) {
 	if st == nil {
 		t.Fatal("allow-listed whatsapp sender rejected")
 	}
-	if r := st.route(); r.transport != "whatsapp" || r.address != jid || r.viaSidecar {
+	if r := st.route(); r.transport != "whatsapp" || r.address != jid {
 		t.Fatalf("whatsapp route wrong: %+v", r)
 	}
-}
 
-// The legacy sidecar path and the daemon path share one session per number, and
-// the reply route follows whichever source delivered the latest message.
-func TestSidecarAndDaemonShareSession(t *testing.T) {
-	d := testComp()
-	jid := "9607654321@s.whatsapp.net"
-
-	// First arrives via the Baileys sidecar: reply over the sidecar.
-	sc := d.stateForSidecarWA("9607654321", jid)
-	if sc == nil || !sc.route().viaSidecar {
-		t.Fatalf("sidecar session not viaSidecar: %+v", sc)
-	}
-
-	// Same number now arrives via the daemon: same session object, route flips
-	// to the daemon (viaSidecar=false).
-	dm := d.stateFor(client.Event{Transport: "whatsapp", Address: jid})
-	if dm != sc {
-		t.Fatal("daemon WA created a separate session instead of sharing by number")
-	}
-	if dm.route().viaSidecar {
-		t.Fatal("route did not flip to the daemon after a daemon-delivered message")
+	// A second message from the same number refreshes the same session (the
+	// reply address follows the latest inbound), keyed by number.
+	st2 := d.stateFor(client.Event{Transport: "whatsapp", Address: jid, Sender: "Imdaah"})
+	if st2 != st {
+		t.Fatal("same WhatsApp number created a separate session instead of reusing one")
 	}
 }
 

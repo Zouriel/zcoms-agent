@@ -19,7 +19,6 @@ import (
 // It replaces the in-daemon receiver the ported errand logic was written against.
 type Comp struct {
 	client      *client.Client
-	waSocket    string
 	waEnabled   bool
 	ownerChat   int64
 	agents      runner.AgentConfig

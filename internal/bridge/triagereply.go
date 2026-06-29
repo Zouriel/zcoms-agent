@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/Zouriel/zcoms/whatsapp"
 )
 
 // sendDirective matches a single reply instruction emitted by the interactive
@@ -181,7 +179,7 @@ func (d *Comp) sendToRecipient(rec Recipient, body string) string {
 		if !d.waEnabled {
 			err = fmt.Errorf("WhatsApp is disabled")
 		} else {
-			err = whatsapp.Send(d.waSocket, rec.WAChat, body)
+			err = d.sendErr(waRoute(rec.WAChat), body)
 		}
 	default:
 		err = d.sendErr(tgRoute(rec.TGChat), body)
@@ -233,7 +231,7 @@ func (d *Comp) sendFileTo(byIndex map[int]Recipient, target, path, caption strin
 				if !d.waEnabled {
 					return fmt.Sprintf("⚠️ Couldn't send file to %s — WhatsApp is disabled.", rec.Name)
 				}
-				if err := whatsapp.SendFile(d.waSocket, rec.WAChat, full, caption); err != nil {
+				if _, err := d.sendFile(waRoute(rec.WAChat), full, caption); err != nil {
 					return fmt.Sprintf("⚠️ Couldn't send file to %s (WhatsApp): %v", rec.Name, err)
 				}
 				return fmt.Sprintf("✅ Sent file to %s (WhatsApp)", rec.Name)

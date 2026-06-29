@@ -127,11 +127,11 @@ func (a *Agent) buildRuntimes() error {
 	seedFn := func(key string) string { return personas.SeedOr(a.Store, key) }
 
 	a.Bridge = bridge.New(bridge.Deps{
-		Client: a.Client, WASocket: settings.WhatsApp.Socket, WAEnabled: settings.WhatsApp.Enabled,
+		Client: a.Client, WAEnabled: settings.WhatsApp.Enabled,
 		Locations: locs, Allow: allow, Agents: agents, Settings: settings, MainChatID: mainChat,
 		PersonaSeed: seedFn,
 	})
-	a.Errands = errands.New(a.Client, settings.WhatsApp.Socket, settings.WhatsApp.Enabled, agents, mainChat, seedFn)
+	a.Errands = errands.New(a.Client, settings.WhatsApp.Enabled, agents, mainChat, seedFn)
 
 	// Migrate the legacy single triage schedule into a "Default" group on first
 	// run (idempotent — only seeds when no groups exist yet).
@@ -149,11 +149,9 @@ func (a *Agent) registerJobs() {
 	// edits (new group, schedule change, enable/disable) take effect live —
 	// no agent restart needed.
 	a.Sched.Interval("triage-dispatch", time.Minute, a.runDueTriageGroups)
-	// The bridge no longer polls the Baileys sidecar for WhatsApp: inbound WA now
-	// arrives over the daemon's in-process whatsmeow transport on the subscribe
-	// stream (Phase D), so a sidecar poll would double-handle every message.
-	// Errands still poll the sidecar until they're wired to the daemon WA feed.
-	a.Sched.Interval("wa-errand-poll", 25*time.Second, a.Errands.PollWhatsApp)
+	// WhatsApp (bridge + errands) is fully on the in-process whatsmeow transport:
+	// inbound arrives over the daemon subscribe stream, so there are no sidecar
+	// polls — the Node Baileys sidecar is retired.
 	a.Sched.Interval("scheduled-errands", 30*time.Second, a.Errands.FireDueScheduled)
 	a.Sched.Interval("workspace-discovery", 10*time.Minute, func() { _, _ = a.Registry.Sync() })
 }
@@ -292,11 +290,10 @@ func (a *Agent) subscribe(ctx context.Context) {
 			}
 			switch transportOf(ev) {
 			case "whatsapp":
-				// Daemon-delivered WhatsApp (whatsmeow). Errands still own their
-				// WA contacts via the sidecar poll for now; until whatsmeow
-				// replaces the sidecar (and errands gains a daemon WA feed), an
-				// errand-owned number is left to that poll, everything else → bridge.
+				// Daemon-delivered WhatsApp (whatsmeow): an errand-owned chat goes
+				// to errands, everything else to the bridge.
 				if a.Errands.OwnsWA(ev.Address) {
+					a.Errands.FeedWhatsApp(ev.Address, ev.MsgRef, ev.Text, ev.File)
 					return
 				}
 				a.Bridge.HandleEvent(ev)
