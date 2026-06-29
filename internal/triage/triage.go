@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -31,15 +32,15 @@ type message struct {
 
 // runOnce performs one triage pass over ALL connected transports (the legacy
 // single-schedule path / `triage now`). It delegates to runGroup with no label.
-func runOnce(c *client.Client, s runner.Settings, seed string) {
-	runGroup(c, s, seed, "", allTransports(s))
+func runOnce(c *client.Client, s runner.Settings, allow runner.Allowlist, seed string) {
+	runGroup(c, s, allow, seed, "", allTransports(s))
 }
 
 // runGroup performs one triage pass for a set of transports (a triage group):
 // gather unread only from those transports, drop the owner's own messages, ask
 // the agent which matter, DM the owner a digest (labeled with the group name),
 // persist the batch for `interact triage`, and mark everything read.
-func runGroup(c *client.Client, s runner.Settings, seed, label string, transports map[string]bool) {
+func runGroup(c *client.Client, s runner.Settings, allow runner.Allowlist, seed, label string, transports map[string]bool) {
 	if s.MainUser == "" || s.MainUser == "@your_username" {
 		log.Println("[triage] main_user not set — nowhere to send a digest; skipping")
 		return
@@ -94,11 +95,19 @@ func runGroup(c *client.Client, s runner.Settings, seed, label string, transport
 		return
 	}
 
+	// Each important bullet starts with the message's number in brackets ("[3]");
+	// collect the bullets and the set of important message indices.
 	var bullets []string
+	important := map[int]bool{}
 	for _, line := range strings.Split(res.Text, "\n") {
 		t := strings.TrimSpace(line)
 		if strings.HasPrefix(t, "•") || strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ") {
 			bullets = append(bullets, t)
+			if mm := importantRe.FindStringSubmatch(t); mm != nil {
+				if idx, err := strconv.Atoi(mm[1]); err == nil && idx >= 1 && idx <= len(msgs) {
+					important[idx-1] = true
+				}
+			}
 		}
 	}
 
@@ -116,6 +125,11 @@ func runGroup(c *client.Client, s runner.Settings, seed, label string, transport
 			return
 		}
 	}
+
+	// Auto-reply: only the IMPORTANT messages get the canned acknowledgement, and
+	// only from non-allow-listed senders (allow-listed people are engaged by the
+	// bridge directly). Everyone else is silently ignored — no per-message spam.
+	sendImportantAutoReplies(c, s, allow, msgs, important)
 
 	read := markRead(c, s, msgs)
 
@@ -203,7 +217,7 @@ func buildPrompt(msgs []message) string {
 	b.WriteString("Decide which are IMPORTANT enough to notify them now (urgent, personal, time-sensitive, ")
 	b.WriteString("or someone clearly needing a reply). Ignore spam, promotions, automated/bot noise, and trivial chatter.\n")
 	b.WriteString("If NONE are important, reply with exactly: NONE\n")
-	b.WriteString("Otherwise reply with a short bullet list, one per important message, and START each bullet with when it arrived: '• <when> — <sender>: <one-line why it matters>'.\n")
+	b.WriteString("Otherwise reply with a short bullet list, one bullet per IMPORTANT message. Start EACH bullet with that message's number from the list below in square brackets, then when it arrived, then the sender and why it matters — exactly like: '• [3] <when> — <sender>: <one-line why it matters>'. Use the exact number; the brackets are required so the system can act on the right message.\n")
 	b.WriteString("Do not take any actions or run any commands.\n\nMessages:\n")
 	for i, m := range msgs {
 		fmt.Fprintf(&b, "%d. [%s] [received %s] From %s: %s", i+1, platformLabel(m.Source), timeLabel(m.When), m.Sender, snippet(m.Text, 300))
@@ -213,6 +227,58 @@ func buildPrompt(msgs []message) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// importantRe pulls a message's number out of a triage bullet ("• [3] …").
+var importantRe = regexp.MustCompile(`\[(\d+)\]`)
+
+// sendImportantAutoReplies sends the canned acknowledgement only to the senders
+// of the IMPORTANT messages, and only when they're NOT allow-listed (allow-listed
+// people are engaged directly by the bridge). One reply per sender per batch, so
+// no one is spammed; non-important senders get nothing.
+func sendImportantAutoReplies(c *client.Client, s runner.Settings, allow runner.Allowlist, msgs []message, important map[int]bool) {
+	text := strings.TrimSpace(s.AutoReply)
+	if !s.AutoReplyEnabled || text == "" || len(important) == 0 {
+		return
+	}
+	done := map[string]bool{}
+	for i, m := range msgs {
+		if !important[i] || allowListed(allow, m) {
+			continue
+		}
+		var key string
+		var err error
+		if m.Source == "wa" {
+			key = "wa|" + m.WAChat
+			if m.WAChat == "" || done[key] {
+				continue
+			}
+			_, err = c.SendOn("whatsapp", m.WAChat, text)
+		} else {
+			key = "tg|" + strconv.FormatInt(m.TGChat, 10)
+			if m.TGChat == 0 || done[key] {
+				continue
+			}
+			_, err = c.Send(strconv.FormatInt(m.TGChat, 10), text)
+		}
+		done[key] = true
+		if err != nil {
+			log.Printf("[triage] auto-reply to %s failed: %v", m.Sender, err)
+		}
+	}
+}
+
+// allowListed reports whether a message's sender is on the allowlist (matched the
+// same way the bridge matches: Telegram by @handle, WhatsApp by number).
+func allowListed(allow runner.Allowlist, m message) bool {
+	var key string
+	if m.Source == "wa" {
+		key = runner.AllowKey("whatsapp", m.WAChat)
+	} else {
+		key = runner.AllowKey("telegram", m.Sender)
+	}
+	_, ok := allow[key]
+	return ok
 }
 
 // markRead clears the processed messages from each platform's unread state and

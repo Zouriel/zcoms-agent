@@ -202,18 +202,21 @@ func (a *Agent) runDueTriageGroups() {
 		return
 	}
 	s, _ := a.buildSettings()
+	allow, _ := a.buildAllow()
 	now := time.Now()
 	seed := personas.SeedOr(a.Store, personas.Triage)
 	for _, g := range groups {
 		if !g.Enabled || !triageGroupDue(g, now) {
 			continue
 		}
-		a.runTriageGroup(s, seed, g, now)
+		a.runTriageGroup(s, allow, seed, g, now)
 	}
 }
 
-// runTriageGroup triages one group's sources and stamps its last-run time.
-func (a *Agent) runTriageGroup(s runner.Settings, seed string, g store.TriageGroup, now time.Time) {
+// runTriageGroup triages one group's sources and stamps its last-run time. allow
+// lets triage send the canned auto-reply only to important non-allow-listed
+// senders.
+func (a *Agent) runTriageGroup(s runner.Settings, allow runner.Allowlist, seed string, g store.TriageGroup, now time.Time) {
 	transports := map[string]bool{}
 	for _, src := range g.Sources {
 		transports[src.Transport] = true
@@ -221,25 +224,26 @@ func (a *Agent) runTriageGroup(s runner.Settings, seed string, g store.TriageGro
 	if len(transports) == 0 {
 		return
 	}
-	triage.RunGroup(a.Client, s, seed, g.Name, transports)
+	triage.RunGroup(a.Client, s, allow, seed, g.Name, transports)
 	_ = a.Store.MarkTriageGroupRan(g.ID, now.UTC().Format(time.RFC3339))
 }
 
 // runTriageNow runs every enabled group immediately (the `triage now` command).
 func (a *Agent) runTriageNow(s runner.Settings) {
 	groups, _ := a.Store.ListTriageGroups()
+	allow, _ := a.buildAllow()
 	seed := personas.SeedOr(a.Store, personas.Triage)
 	now := time.Now()
 	ran := false
 	for _, g := range groups {
 		if g.Enabled {
-			a.runTriageGroup(s, seed, g, now)
+			a.runTriageGroup(s, allow, seed, g, now)
 			ran = true
 		}
 	}
 	if !ran {
 		// No groups configured/enabled — fall back to an all-sources pass.
-		triage.RunOnce(a.Client, s, seed)
+		triage.RunOnce(a.Client, s, allow, seed)
 	}
 }
 

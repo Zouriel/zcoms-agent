@@ -39,7 +39,6 @@ func New(d Deps) *Comp {
 		mainChatID:       d.MainChatID,
 		personaSeed:      d.PersonaSeed,
 		byUser:           map[string]*userState{},
-		autoReplied:      map[string]bool{},
 	}
 }
 
@@ -49,7 +48,9 @@ func New(d Deps) *Comp {
 func (d *Comp) HandleEvent(ev client.Event) bool {
 	st := d.stateFor(ev)
 	if st == nil {
-		d.maybeAutoReply(ev) // canned ack to non-allow-listed senders
+		// Not allow-listed: no immediate reply. The message is stored as unread;
+		// triage decides which non-allow-listed messages are important and sends
+		// the canned auto-reply only to those (avoids spamming everyone).
 		return false
 	}
 	if ev.Kind != "" && ev.Kind != "messageText" {
@@ -135,46 +136,6 @@ func (d *Comp) SetSettings(s Settings) {
 	d.mu.Lock()
 	d.settings = s
 	d.mu.Unlock()
-}
-
-// maybeAutoReply sends the canned acknowledgement to a non-allow-listed sender
-// when auto-reply is enabled — once per sender per session, so someone who keeps
-// messaging isn't spammed. The owner is informed about the message separately by
-// triage (which digests non-allow-listed unread). Works on every transport.
-func (d *Comp) maybeAutoReply(ev client.Event) {
-	if ev.FromSelf {
-		return
-	}
-	d.mu.Lock()
-	enabled := d.settings.AutoReplyEnabled
-	text := strings.TrimSpace(d.settings.AutoReply)
-	d.mu.Unlock()
-	if !enabled || text == "" {
-		return
-	}
-
-	tp := ev.Transport
-	if tp == "" {
-		tp = "telegram"
-	}
-	addr := ev.Address
-	if addr == "" {
-		addr = strconv.FormatInt(ev.ChatID, 10)
-	}
-	if addr == "" || addr == "0" {
-		return
-	}
-
-	key := tp + "|" + addr
-	d.mu.Lock()
-	if d.autoReplied[key] {
-		d.mu.Unlock()
-		return
-	}
-	d.autoReplied[key] = true
-	d.mu.Unlock()
-
-	_ = d.sendErr(route{transport: tp, address: addr}, text)
 }
 
 // SetAllow swaps in a freshly-built allowlist (after an owner add/remove) so the
