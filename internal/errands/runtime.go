@@ -90,6 +90,19 @@ func (d *Comp) Owns(chatID int64) bool {
 	return false
 }
 
+// OwnsWA reports whether an active errand claims a WhatsApp chat (jid), so the
+// agent's WA poll routes that message to errands instead of the bridge.
+func (d *Comp) OwnsWA(jid string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, e := range d.errands {
+		if e.Source == "wa" && e.WAChat == jid && e.active() {
+			return true
+		}
+	}
+	return false
+}
+
 // PollWhatsApp runs one WhatsApp reply-poll pass (driven by the scheduler).
 func (d *Comp) PollWhatsApp() { d.pollWAOnce() }
 

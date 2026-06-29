@@ -43,6 +43,8 @@ var (
 	ValidRole           = runner.ValidRole
 	LoadOrSeedLocations = runner.LoadOrSeedLocations
 	LoadOrSeedSettings  = runner.LoadOrSeedSettings
+	AllowKey            = runner.AllowKey
+	WADigits            = runner.WADigits
 )
 
 // roleRank mirrors the SDK's unexported Role.rank (read<confirm<edit<full), used

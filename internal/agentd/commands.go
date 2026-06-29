@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
 )
 
@@ -286,6 +287,16 @@ func (a *Agent) personaCmd(args []string) (string, error) {
 	}
 }
 
+// isRoleWord reports whether s is a role keyword (so trailing-role parsing
+// doesn't swallow a handle token).
+func isRoleWord(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "read", "confirm", "edit", "full":
+		return true
+	}
+	return false
+}
+
 func (a *Agent) allowlistCmd(args []string) (string, error) {
 	sub := ""
 	if len(args) > 0 {
@@ -306,15 +317,26 @@ func (a *Agent) allowlistCmd(args []string) (string, error) {
 		}
 		return strings.TrimRight(b.String(), "\n"), nil
 	case "add":
-		// allowlist add <handle> [role]  (platform defaults to telegram)
-		if len(args) < 2 {
-			return "", fmt.Errorf("usage: allowlist add <@handle> [read|confirm|edit|full]")
+		// allowlist add [telegram|whatsapp] <handle…> [role]  (platform defaults to
+		// telegram). The handle is the middle tokens joined, so a WhatsApp number
+		// with spaces survives; the role is the trailing token only when it's a
+		// valid role keyword.
+		rest := args[1:]
+		platform := "telegram"
+		if len(rest) > 0 && (strings.EqualFold(rest[0], "telegram") || strings.EqualFold(rest[0], "whatsapp")) {
+			platform = strings.ToLower(rest[0])
+			rest = rest[1:]
 		}
 		role := "read"
-		if len(args) >= 3 {
-			role = args[2]
+		if len(rest) >= 2 && isRoleWord(rest[len(rest)-1]) {
+			role = strings.ToLower(rest[len(rest)-1])
+			rest = rest[:len(rest)-1]
 		}
-		_, err := a.Store.CreateAllow(store.Owner, store.AllowEntry{Platform: "telegram", Handle: args[1], MaxRole: role})
+		if len(rest) < 1 {
+			return "", fmt.Errorf("usage: allowlist add [telegram|whatsapp] <@handle|number> [read|confirm|edit|full]")
+		}
+		handle := runner.NormalizeAllowHandle(platform, strings.Join(rest, " "))
+		_, err := a.Store.CreateAllow(store.Owner, store.AllowEntry{Platform: platform, Handle: handle, MaxRole: role})
 		return "Added.", err
 	case "rm", "remove":
 		if len(args) < 2 {

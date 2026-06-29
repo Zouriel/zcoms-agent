@@ -16,7 +16,9 @@ const telegramMaxLen = 4000
 type userState struct {
 	username string
 	entry    AllowEntry
-	chatID   int64
+	chatID   int64  // Telegram chat id, or a WhatsApp session's synthetic (negative) id
+	platform string // "telegram" | "whatsapp"
+	waChat   string // WhatsApp jid for replies (platform=="whatsapp")
 
 	location      string // active location name ("" = none picked)
 	locationPath  string

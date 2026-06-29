@@ -20,7 +20,9 @@ func (a *Agent) buildAllow() (runner.Allowlist, error) {
 		if role == "" {
 			role = runner.RoleRead
 		}
-		out[e.Handle] = runner.AllowEntry{Role: role, Locations: []string{"*"}}
+		// Key by platform+handle so a Telegram @handle and a WhatsApp number are
+		// matched per-platform (and can't collide).
+		out[runner.AllowKey(e.Platform, e.Handle)] = runner.AllowEntry{Role: role, Locations: []string{"*"}}
 	}
 	return out, nil
 }

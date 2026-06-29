@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Role controls how much an allow-listed user can make Claude do.
@@ -220,4 +221,69 @@ func writeJSON(path string, value any) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)
+}
+
+// --- allow-list key normalization (shared by the agent's buildAllow and the
+// bridge's lookupAllow so a stored entry and an inbound sender map identically) ---
+
+// WADigits reduces a WhatsApp number/jid to its bare digits: it drops a jid
+// suffix ("…@s.whatsapp.net"), "+", spaces and punctuation. "+960 765-4321" and
+// "9607654321@s.whatsapp.net" both become "9607654321".
+func WADigits(s string) string {
+	if i := strings.IndexByte(s, '@'); i >= 0 {
+		s = s[:i]
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// AllowKey is the canonical "<platform>|<handle>" map key. Telegram handles are
+// lower-cased and @-prefixed (usernames are case-insensitive); WhatsApp handles
+// reduce to digits. Both the stored allow-list and an inbound sender go through
+// here, so matching is platform-aware and format-insensitive.
+func AllowKey(platform, handle string) string {
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "whatsapp":
+		return "whatsapp|" + WADigits(handle)
+	default:
+		h := strings.ToLower(strings.TrimSpace(handle))
+		if h != "" && !strings.HasPrefix(h, "@") && !looksLikePhone(h) {
+			h = "@" + h
+		}
+		return "telegram|" + h
+	}
+}
+
+// NormalizeAllowHandle tidies a handle for storage/display: a Telegram username
+// gets its leading @ (a phone is left alone); a WhatsApp number reduces to digits.
+func NormalizeAllowHandle(platform, handle string) string {
+	if strings.EqualFold(strings.TrimSpace(platform), "whatsapp") {
+		return WADigits(handle)
+	}
+	h := strings.TrimSpace(handle)
+	if h != "" && !strings.HasPrefix(h, "@") && !looksLikePhone(h) {
+		h = "@" + h
+	}
+	return h
+}
+
+func looksLikePhone(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if s[0] == '+' {
+		return true
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }

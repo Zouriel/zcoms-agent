@@ -40,6 +40,7 @@ func New(d Deps) *Comp {
 		mainChatID:       d.MainChatID,
 		personaSeed:      d.PersonaSeed,
 		byUser:           map[int64]*userState{},
+		waChat:           map[int64]string{},
 	}
 }
 
@@ -68,33 +69,34 @@ func (d *Comp) stateFor(ev client.Event) *userState {
 		st.chatID = ev.ChatID
 		return st
 	}
-	handle, entry, ok := d.lookupAllow(ev.Sender)
+	handle, entry, ok := d.lookupAllow("telegram", ev.Sender)
 	if !ok {
 		return nil
 	}
 	st := &userState{
-		username: handle, // the allow-list handle (canonical case), not the raw event value
+		username: handle, // the allow-list handle (canonical), not the raw event value
 		entry:    entry,
 		chatID:   ev.ChatID,
+		platform: "telegram",
 		backend:  d.agents.For("bridge", entry.Agent),
 	}
 	d.byUser[ev.UserID] = st
 	return st
 }
 
-// lookupAllow finds an allow-list entry for a sender handle, case-insensitively
-// (Telegram @usernames are case-insensitive, so a casing difference between the
-// authored allow-list and TDLib's canonical form must not drop the message).
-// Returns the stored handle so downstream actor/identity use is consistent.
-func (d *Comp) lookupAllow(sender string) (string, AllowEntry, bool) {
-	if e, ok := d.allow[sender]; ok {
-		return sender, e, true
+// lookupAllow finds an allow-list entry for an inbound (platform, sender). Both
+// sides go through AllowKey, so Telegram @usernames match case-insensitively and
+// WhatsApp numbers match regardless of +/spaces/jid-suffix. Returns the matched
+// handle for downstream actor/identity use.
+func (d *Comp) lookupAllow(platform, sender string) (string, AllowEntry, bool) {
+	key := AllowKey(platform, sender)
+	e, ok := d.allow[key]
+	if !ok {
+		return "", AllowEntry{}, false
 	}
-	want := strings.ToLower(strings.TrimSpace(sender))
-	for h, e := range d.allow {
-		if strings.ToLower(strings.TrimSpace(h)) == want {
-			return h, e, true
-		}
+	handle := key
+	if i := strings.IndexByte(key, '|'); i >= 0 {
+		handle = key[i+1:]
 	}
-	return "", AllowEntry{}, false
+	return handle, e, true
 }

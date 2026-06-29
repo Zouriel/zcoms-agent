@@ -26,6 +26,7 @@ import (
 	"github.com/Zouriel/zcoms-agent/internal/workspaces"
 	"github.com/Zouriel/zcoms-agent/scheduler"
 	"github.com/Zouriel/zcoms/client"
+	"github.com/Zouriel/zcoms/whatsapp"
 )
 
 // Agent is the unified runtime.
@@ -148,8 +149,36 @@ func (a *Agent) registerJobs() {
 		})
 	}
 	a.Sched.Interval("wa-errand-poll", 25*time.Second, a.Errands.PollWhatsApp)
+	a.Sched.Interval("wa-bridge-poll", 20*time.Second, a.pollWhatsAppBridge)
 	a.Sched.Interval("scheduled-errands", 30*time.Second, a.Errands.FireDueScheduled)
 	a.Sched.Interval("workspace-discovery", 10*time.Minute, func() { _, _ = a.Registry.Sync() })
+}
+
+// pollWhatsAppBridge polls WhatsApp unread and feeds messages from allow-listed
+// numbers into the interactive bridge (WhatsApp has no real-time push, so the
+// bridge is poll-driven there). Messages claimed by an active errand are left to
+// the errands poll; everything else the bridge consumes is marked read.
+func (a *Agent) pollWhatsAppBridge() {
+	if !a.settings.WhatsApp.Enabled {
+		return
+	}
+	sock := a.settings.WhatsApp.Socket
+	unread, err := whatsapp.FetchUnread(sock)
+	if err != nil {
+		return
+	}
+	consumed := map[string][]string{}
+	for _, u := range unread {
+		if a.Errands.OwnsWA(u.ChatID) {
+			continue
+		}
+		if a.Bridge.HandleWhatsApp(u.ChatID, u.Text, u.File) {
+			consumed[u.ChatID] = append(consumed[u.ChatID], u.MsgID)
+		}
+	}
+	for jid, ids := range consumed {
+		_ = whatsapp.Dismiss(sock, jid, ids)
+	}
 }
 
 // runTriageNow runs one triage pass immediately (the `triage now` command).

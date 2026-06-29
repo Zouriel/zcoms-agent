@@ -13,6 +13,7 @@ import (
 
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms/client"
+	"github.com/Zouriel/zcoms/whatsapp"
 )
 
 // Comp is the bridge component's runtime. It owns the interactive per-user
@@ -35,6 +36,12 @@ type Comp struct {
 	mu       sync.Mutex
 	triageMu sync.Mutex
 	byUser   map[int64]*userState
+
+	// waChat maps a WhatsApp session's synthetic (negative) chat id to its jid,
+	// so the central send helpers can route replies over the sidecar without the
+	// ~57 call sites needing to know the platform.
+	waMu   sync.RWMutex
+	waChat map[int64]string
 }
 
 // seed returns a persona's owner-editable seed prompt, or "" when no accessor is
@@ -48,7 +55,23 @@ func (d *Comp) seed(key string) string {
 
 func (d *Comp) send(chatID int64, text string) { _ = d.sendErr(chatID, text) }
 
+// waChatFor returns the WhatsApp jid for a session's synthetic chat id, or ""
+// when the id belongs to a Telegram session.
+func (d *Comp) waChatFor(chatID int64) string {
+	d.waMu.RLock()
+	defer d.waMu.RUnlock()
+	return d.waChat[chatID]
+}
+
 func (d *Comp) sendErr(chatID int64, text string) error {
+	if jid := d.waChatFor(chatID); jid != "" {
+		for _, part := range chunk(text, telegramMaxLen) {
+			if err := whatsapp.Send(d.waSocket, jid, part); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	for _, part := range chunk(text, telegramMaxLen) {
 		if _, err := d.client.Send(strconv.FormatInt(chatID, 10), part); err != nil {
 			return err
@@ -58,6 +81,9 @@ func (d *Comp) sendErr(chatID int64, text string) error {
 }
 
 func (d *Comp) sendFileTG(chatID int64, path, caption string) (string, error) {
+	if jid := d.waChatFor(chatID); jid != "" {
+		return "", whatsapp.SendFile(d.waSocket, jid, path, caption)
+	}
 	resp, err := d.client.SendFile(strconv.FormatInt(chatID, 10), path, caption)
 	return resp.Label, err
 }
