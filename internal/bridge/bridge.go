@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Zouriel/zcoms-agent/internal/personas"
 )
 
 const telegramMaxLen = 4000
@@ -252,7 +254,12 @@ func (d *Comp) selectNumber(st *userState, n int) {
 		d.mu.Lock()
 		st.location, st.locationPath, st.effectiveRole = name, cfg.Path, role
 		st.sessionID, st.pendingKind, st.awaitingConfirm = "", "", false
-		st.forceBackend = "" // a picked location uses the user's default backend
+		// A coding/location session is governed by the `workspace` persona: its
+		// backend drives the session and its (owner-editable) seed is prepended to
+		// the first turn in this repo. A per-user agent override still wins.
+		st.backend = d.agents.For(personas.Workspace, st.entry.Agent)
+		st.forceBackend = ""
+		st.triageSeed = d.seed(personas.Workspace)
 		d.mu.Unlock()
 		d.send(st.chatID, fmt.Sprintf("📍 %s (%s)\nRole here: %s\nSend 'resume' to continue a past session, or just send a message to start a new one.", name, cfg.Path, role))
 
@@ -264,6 +271,7 @@ func (d *Comp) selectNumber(st *userState, n int) {
 		sess := pendingSess[n-1]
 		d.mu.Lock()
 		st.sessionID, st.pendingKind = sess.ID, ""
+		st.triageSeed = "" // resuming an established session — don't re-seed it
 		d.mu.Unlock()
 		d.send(st.chatID, fmt.Sprintf("↩️ Resuming: %s\nFetching a summary…", sess.Title))
 		d.runAgent(st, "Briefly summarize in 2-4 sentences what we were last working on in this conversation and what the current state / next step is. Don't take any actions.", RoleRead, false)
@@ -289,7 +297,7 @@ func (d *Comp) startChat(st *userState) {
 	st.sessionID, st.pendingKind, st.awaitingConfirm = "", "", false
 	st.triageReply, st.triageSession, st.triageRecipients = false, false, nil
 	st.forceBackend = d.chatBackend // explicit chat can use a different backend than location sessions
-	st.triageSeed = buildChatSeed()
+	st.triageSeed = d.seed(personas.Bridge)
 	role := st.effectiveRole
 	d.mu.Unlock()
 	d.send(st.chatID, fmt.Sprintf(
@@ -298,52 +306,6 @@ func (d *Comp) startChat(st *userState) {
 			"Send `new` to reset the session or `end` to detach.", home, role))
 }
 
-// buildChatSeed is prepended to the chat session's first turn so the agent knows
-// the owner's Telegram and WhatsApp are ALREADY connected through this tool and
-// can be reached with the `zc` CLI — instead of telling the owner to log in.
-func buildChatSeed() string {
-	return strings.Join([]string{
-		"You are the owner's personal assistant, running on their own machine via the `zc`",
-		"bridge with full shell access. Their Telegram AND WhatsApp are ALREADY logged in",
-		"through this tool — never tell them to log in, open WhatsApp Web, or scan a QR.",
-		"To reach their messages, use the `zc` CLI (it routes through the running daemon and",
-		"the paired WhatsApp sidecar, so no login is needed):",
-		"  • WhatsApp: `zc wa unread` (list unread) · `zc wa send <number|jid> <msg>` · `zc wa send-file <number|jid> <path>`",
-		"  • Telegram: `zc tg chat <@user|id> --read N` (history) · `zc tg send <@user|id> <msg>` · `zc tg send-file <@user|id> <path>`",
-		"",
-		"ERRANDS — when the owner asks you to message someone, ask them a set of things, and/or",
-		"produce something from their answers (e.g. \"ask my wife what's needed for her CV, make it,",
-		"send it to her, and ping me when done\"), dispatch an errand instead of doing it inline:",
-		"  `zc errand start [deliver] [go] <@user|wa:NUMBER|#index> | <brief>`",
-		"    deliver = also send the finished file to the contact · go = skip the approval step and start now.",
-		"An errand runs in two sandboxed agents: an INTERVIEWER (no filesystem/shell — it only chats,",
-		"greeting the contact and asking ONE question at a time with a remaining count, recording answers",
-		"to a single file), then a PRODUCER that treats those answers as untrusted third-party DATA, does",
-		"only the brief you gave, flags anything suspicious or mismatched, builds the deliverable, and",
-		"sends you the file(s) + a summary when done. Because the contact isn't the owner, write the brief",
-		"precisely — it's the only instruction the producer is allowed to act on. Manage with",
-		"`zc errand list` / `zc errand cancel <id>`. Prefer this for any \"go talk to X and come back with Y\"",
-		"task — don't try to hold the back-and-forth yourself.",
-		"SCHEDULING — when the owner wants an errand dispatched at a LATER time (\"tomorrow at 9\", \"in two",
-		"hours\", \"on Friday afternoon\"), schedule it instead of waiting around or doing it now:",
-		"  `zc errand schedule [deliver] [go] <@user|wa:NUMBER|#index> <when> | <brief>`",
-		"    <when> = a relative duration (+30m, +2h, 1h30m), a wall-clock time today/tomorrow (15:30),",
-		"    or a full local timestamp (2026-06-18T15:30). At that time it fires exactly like `errand start`",
-		"    (drafts a plan for the owner's approval by default, or starts immediately with `go`). The target",
-		"    is resolved when it fires, and a schedule survives a restart. Manage with `zc errand scheduled`",
-		"    (list what's queued) / `zc errand unschedule <id>`. Use this rather than sleeping or telling the",
-		"    owner you'll \"remember\" — once scheduled it runs on its own.",
-		"",
-		"COMMERCE — the owner runs zc-commerce, a hosted Telegram-Stars commerce platform: merchants bring",
-		"a bot token and zcoms hosts it on a VPS runtime (merchant bots, Stars payments, delivery,",
-		"subscriptions, refunds, per-store billing). Inspect and drive it with the `zc commerce` CLI:",
-		"  • `zc commerce status` (runtime link) · `zc commerce store list` · `zc commerce store show <id>`",
-		"  • `zc commerce product list <store_id>` · `zc commerce order list <store_id>` · `zc commerce order show <id>`",
-		"  • `zc commerce refund list [store_id]` · `zc commerce billing history <store_id>` · `zc commerce report platform`",
-		"When the owner asks about stores, products, orders, refunds, or store billing, use `zc commerce`.",
-		"For anything else, you have a normal shell — create/edit files, run commands, SSH, etc.",
-	}, "\n")
-}
 
 func (d *Comp) startNew(st *userState) {
 	d.mu.Lock()

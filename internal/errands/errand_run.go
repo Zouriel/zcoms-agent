@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms/whatsapp"
 )
@@ -299,7 +300,7 @@ func (d *Comp) runInterviewTurn(e *Errand, prompt string) (handoff bool) {
 
 	send := prompt
 	if e.InterviewSessionID == "" {
-		send = buildInterviewerSeed(e) + "\n\n" + prompt
+		send = withSeed(d.seed(personas.ErrandInterviewer), buildInterviewerSeed(e)) + "\n\n" + prompt
 	}
 	d.logErrand(e, errandLogInterviewer, "agent_start", "backend=%s session=%q writable=false prompt=%q", backend, e.InterviewSessionID, snippet(prompt, 1200))
 	// runner.RoleRead + non-writable staging = plan mode: the interviewer cannot write
@@ -437,7 +438,7 @@ func (d *Comp) runWorkerTurn(e *Errand, prompt string) (done bool) {
 
 	send := prompt
 	if e.WorkerSessionID == "" {
-		send = buildWorkerSeed(e) + "\n\n" + prompt
+		send = withSeed(d.seed(personas.ErrandProducer), buildWorkerSeed(e)) + "\n\n" + prompt
 	}
 	d.logErrand(e, errandLogProducer, "agent_start", "backend=%s session=%q writable=true prompt=%q", backend, e.WorkerSessionID, snippet(prompt, 1200))
 	// runner.RoleRead + writable staging = acceptEdits in the scratch dir: the producer

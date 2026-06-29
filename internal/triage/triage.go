@@ -32,7 +32,7 @@ type message struct {
 // runOnce performs one triage pass: gather unread (Telegram via IPC, WhatsApp
 // via the sidecar), ask the agent which matter, DM the owner a digest, persist
 // the batch for `interact triage`, and mark everything read.
-func runOnce(c *client.Client, s runner.Settings) {
+func runOnce(c *client.Client, s runner.Settings, seed string) {
 	if s.MainUser == "" || s.MainUser == "@your_username" {
 		log.Println("[triage] main_user not set — nowhere to send a digest; skipping")
 		return
@@ -69,7 +69,11 @@ func runOnce(c *client.Client, s runner.Settings) {
 		return
 	}
 	prevID := loadSessionID()
-	res, runErr := runner.RunAgent(backend, s.Triage.Dir, buildPrompt(msgs), prevID, runner.RoleRead, false)
+	prompt := buildPrompt(msgs)
+	if strings.TrimSpace(seed) != "" {
+		prompt = seed + "\n\n" + prompt
+	}
+	res, runErr := runner.RunAgent(backend, s.Triage.Dir, prompt, prevID, runner.RoleRead, false)
 	if res.SessionID != "" {
 		saveSessionID(res.SessionID)
 	}

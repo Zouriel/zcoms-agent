@@ -7,5 +7,6 @@ import (
 
 // RunOnce executes one triage pass: read unread, ask the agent which matter, DM
 // the owner a digest, mark the rest read. Exported for the scheduler and the
-// agent.sock command path.
-func RunOnce(c *client.Client, s runner.Settings) { runOnce(c, s) }
+// agent.sock command path. seed is the owner-editable Triage persona scaffold,
+// prepended to the digest prompt ("" to skip).
+func RunOnce(c *client.Client, s runner.Settings, seed string) { runOnce(c, s, seed) }

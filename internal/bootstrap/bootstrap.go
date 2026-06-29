@@ -23,6 +23,11 @@ func Run(s *store.Store) error {
 	if err := personas.SeedDefaults(s); err != nil {
 		return err
 	}
+	// Migrate any superseded default seed (e.g. the Bridge row) to the current
+	// default; edited rows are left untouched. Runs every start (idempotent).
+	if err := personas.UpgradeDefaults(s); err != nil {
+		return err
+	}
 	if done, _ := s.GetSetting(migratedKey); done == "1" {
 		return nil
 	}

@@ -18,16 +18,33 @@ import (
 // Telegram through the core daemon over IPC and WhatsApp through the sidecar.
 // It replaces the in-daemon receiver the ported errand logic was written against.
 type Comp struct {
-	client    *client.Client
-	waSocket  string
-	waEnabled bool
-	ownerChat int64
-	agents    runner.AgentConfig
+	client      *client.Client
+	waSocket    string
+	waEnabled   bool
+	ownerChat   int64
+	agents      runner.AgentConfig
+	personaSeed func(key string) string // owner-editable persona scaffolds (agent.db)
 
 	mu         sync.Mutex
 	errands    map[string]*Errand
 	interviews map[int64]*interview        // standup interviews in flight, keyed by chat
 	scheduled  map[string]*ScheduledErrand // errands queued to fire at a future time, by id
+}
+
+// seed returns a persona's owner-editable seed prompt, or "" when unwired.
+func (d *Comp) seed(key string) string {
+	if d.personaSeed == nil {
+		return ""
+	}
+	return d.personaSeed(key)
+}
+
+// withSeed prepends a persona's editable scaffold to a built prompt body.
+func withSeed(seed, body string) string {
+	if strings.TrimSpace(seed) == "" {
+		return body
+	}
+	return seed + "\n\n" + body
 }
 
 // --- IO the ported errand logic calls (TG via IPC, WA via the sidecar) -------

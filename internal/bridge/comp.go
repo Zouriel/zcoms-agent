@@ -18,21 +18,32 @@ import (
 // Comp is the bridge component's runtime. It owns the interactive per-user
 // session state and reaches Telegram through the core daemon over IPC.
 type Comp struct {
-	client        *client.Client
-	waSocket      string
-	waEnabled     bool
-	bridgeBackend Backend
-	chatBackend   Backend
-	triageBackend Backend
-	locations     Locations
-	allow         Allowlist
-	agents        AgentConfig
-	settings      Settings
-	mainChatID    int64
+	client           *client.Client
+	waSocket         string
+	waEnabled        bool
+	bridgeBackend    Backend
+	chatBackend      Backend
+	triageBackend    Backend
+	workspaceBackend Backend
+	locations        Locations
+	allow            Allowlist
+	agents           AgentConfig
+	settings         Settings
+	mainChatID       int64
+	personaSeed      func(key string) string
 
 	mu       sync.Mutex
 	triageMu sync.Mutex
 	byUser   map[int64]*userState
+}
+
+// seed returns a persona's owner-editable seed prompt, or "" when no accessor is
+// wired. Used to prepend the editable scaffold to the chat / workspace first turn.
+func (d *Comp) seed(key string) string {
+	if d.personaSeed == nil {
+		return ""
+	}
+	return d.personaSeed(key)
 }
 
 func (d *Comp) send(chatID int64, text string) { _ = d.sendErr(chatID, text) }

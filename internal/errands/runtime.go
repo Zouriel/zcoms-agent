@@ -12,16 +12,17 @@ import (
 // New builds the errands runtime for the unified agent process. The agent owns
 // one harness connection and routes events in; errands no longer subscribes on
 // its own (that was the standalone component's job).
-func New(c *client.Client, waSocket string, waEnabled bool, agents runner.AgentConfig, ownerChat int64) *Comp {
+func New(c *client.Client, waSocket string, waEnabled bool, agents runner.AgentConfig, ownerChat int64, personaSeed func(key string) string) *Comp {
 	d := &Comp{
-		client:     c,
-		waSocket:   waSocket,
-		waEnabled:  waEnabled,
-		agents:     agents,
-		ownerChat:  ownerChat,
-		errands:    map[string]*Errand{},
-		interviews: map[int64]*interview{},
-		scheduled:  map[string]*ScheduledErrand{},
+		client:      c,
+		waSocket:    waSocket,
+		waEnabled:   waEnabled,
+		agents:      agents,
+		personaSeed: personaSeed,
+		ownerChat:   ownerChat,
+		errands:     map[string]*Errand{},
+		interviews:  map[int64]*interview{},
+		scheduled:   map[string]*ScheduledErrand{},
 	}
 	// Resume persisted errands + their claims, and any scheduled errands.
 	if list, err := LoadErrands(); err == nil {

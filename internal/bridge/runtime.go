@@ -18,23 +18,28 @@ type Deps struct {
 	Agents     runner.AgentConfig
 	Settings   runner.Settings
 	MainChatID int64
+	// PersonaSeed returns a persona's owner-editable seed prompt (from agent.db),
+	// read live per call so console edits take effect without a restart. May be nil.
+	PersonaSeed func(key string) string
 }
 
 // New builds the interactive bridge runtime for the unified agent process.
 func New(d Deps) *Comp {
 	return &Comp{
-		client:        d.Client,
-		waSocket:      d.WASocket,
-		waEnabled:     d.WAEnabled,
-		bridgeBackend: d.Agents.For("bridge", ""),
-		chatBackend:   d.Agents.For("chat", ""),
-		triageBackend: d.Agents.For("triage", ""),
-		locations:     d.Locations,
-		allow:         d.Allow,
-		agents:        d.Agents,
-		settings:      d.Settings,
-		mainChatID:    d.MainChatID,
-		byUser:        map[int64]*userState{},
+		client:           d.Client,
+		waSocket:         d.WASocket,
+		waEnabled:        d.WAEnabled,
+		bridgeBackend:    d.Agents.For("bridge", ""),
+		chatBackend:      d.Agents.For("chat", ""),
+		triageBackend:    d.Agents.For("triage", ""),
+		workspaceBackend: d.Agents.For("workspace", ""),
+		locations:        d.Locations,
+		allow:            d.Allow,
+		agents:           d.Agents,
+		settings:         d.Settings,
+		mainChatID:       d.MainChatID,
+		personaSeed:      d.PersonaSeed,
+		byUser:           map[int64]*userState{},
 	}
 }
 

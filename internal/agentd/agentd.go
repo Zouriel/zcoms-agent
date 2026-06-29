@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Zouriel/zcoms-agent/internal/bootstrap"
+	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/bridge"
 	"github.com/Zouriel/zcoms-agent/internal/errands"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
@@ -121,11 +122,16 @@ func (a *Agent) buildRuntimes() error {
 		}
 	}
 
+	// seedFn reads a persona's owner-editable seed prompt from agent.db live, so
+	// console edits take effect without a restart.
+	seedFn := func(key string) string { return personas.SeedOr(a.Store, key) }
+
 	a.Bridge = bridge.New(bridge.Deps{
 		Client: a.Client, WASocket: settings.WhatsApp.Socket, WAEnabled: settings.WhatsApp.Enabled,
 		Locations: locs, Allow: allow, Agents: agents, Settings: settings, MainChatID: mainChat,
+		PersonaSeed: seedFn,
 	})
-	a.Errands = errands.New(a.Client, settings.WhatsApp.Socket, settings.WhatsApp.Enabled, agents, mainChat)
+	a.Errands = errands.New(a.Client, settings.WhatsApp.Socket, settings.WhatsApp.Enabled, agents, mainChat, seedFn)
 	return nil
 }
 
@@ -137,7 +143,7 @@ func (a *Agent) registerJobs() {
 		a.Sched.Interval("triage", d, func() {
 			s, _ := a.buildSettings()
 			if s.Triage.Enabled {
-				triage.RunOnce(a.Client, s)
+				triage.RunOnce(a.Client, s, personas.SeedOr(a.Store, personas.Triage))
 			}
 		})
 	}
@@ -147,7 +153,9 @@ func (a *Agent) registerJobs() {
 }
 
 // runTriageNow runs one triage pass immediately (the `triage now` command).
-func (a *Agent) runTriageNow(s runner.Settings) { triage.RunOnce(a.Client, s) }
+func (a *Agent) runTriageNow(s runner.Settings) {
+	triage.RunOnce(a.Client, s, personas.SeedOr(a.Store, personas.Triage))
+}
 
 // triageInterval maps a schedule keyword to a poll interval (default 1h).
 func triageInterval(schedule string) time.Duration {
