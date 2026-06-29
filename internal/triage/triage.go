@@ -13,7 +13,6 @@ import (
 
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms/client"
-	"github.com/Zouriel/zcoms/whatsapp"
 )
 
 // message is one unread item from either platform, unified for triage.
@@ -143,34 +142,35 @@ func allTransports(s runner.Settings) map[string]bool {
 	return t
 }
 
-// collectUnreadFiltered merges unread from only the requested transports:
-// Telegram (from the daemon over IPC) and WhatsApp (from the sidecar, when
-// enabled). transports keys are "telegram" | "whatsapp" | "instagram".
+// collectUnreadFiltered fetches unread across all transports from the daemon
+// (Telegram live from TDLib, WhatsApp from the in-process whatsmeow store) and
+// keeps only the requested transports. transports keys are "telegram" |
+// "whatsapp" | "instagram".
 func collectUnreadFiltered(c *client.Client, s runner.Settings, transports map[string]bool) ([]message, error) {
+	items, err := c.Unread()
+	if err != nil {
+		return nil, err
+	}
 	var msgs []message
-	if transports["telegram"] {
-		tg, err := c.Unread()
-		if err != nil {
-			return nil, err
+	for _, it := range items {
+		tp := it.Transport
+		if tp == "" {
+			tp = "telegram"
 		}
-		for _, it := range tg {
+		if !transports[tp] {
+			continue
+		}
+		switch tp {
+		case "whatsapp":
+			msgs = append(msgs, message{
+				Sender: it.Sender, Text: it.Text, When: time.Unix(it.When, 0),
+				Source: "wa", WAChat: it.Address, WAMsg: it.MsgRef, File: it.File,
+			})
+		default:
 			msgs = append(msgs, message{
 				Sender: it.Sender, Text: it.Text, When: time.Unix(it.When, 0),
 				Source: "tg", TGChat: it.ChatID, TGMsg: it.MsgID,
 			})
-		}
-	}
-	if transports["whatsapp"] && s.WhatsApp.Enabled {
-		wa, err := whatsapp.FetchUnread(s.WhatsApp.Socket)
-		if err != nil {
-			log.Printf("[triage] whatsapp unavailable, skipping: %v", err)
-		} else {
-			for _, u := range wa {
-				msgs = append(msgs, message{
-					Sender: u.Sender, Text: u.Text, When: u.When,
-					Source: "wa", WAChat: u.ChatID, WAMsg: u.MsgID, File: u.File,
-				})
-			}
 		}
 	}
 	return msgs, nil
@@ -235,19 +235,11 @@ func markRead(c *client.Client, s runner.Settings, msgs []message) int {
 			read += len(ids)
 		}
 	}
-	if s.WhatsApp.Enabled {
-		for chat, ids := range waByChat {
-			var err error
-			if s.WhatsApp.ReadReceipts {
-				err = whatsapp.MarkRead(s.WhatsApp.Socket, chat, ids)
-			} else {
-				err = whatsapp.Dismiss(s.WhatsApp.Socket, chat, ids)
-			}
-			if err != nil {
-				log.Printf("[triage] couldn't clear wa unread in %s: %v", chat, err)
-			} else {
-				read += len(ids)
-			}
+	for chat, refs := range waByChat {
+		if err := c.MarkReadOn("whatsapp", chat, refs); err != nil {
+			log.Printf("[triage] couldn't clear wa unread in %s: %v", chat, err)
+		} else {
+			read += len(refs)
 		}
 	}
 	return read

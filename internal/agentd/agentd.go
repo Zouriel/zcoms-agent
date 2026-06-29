@@ -26,7 +26,6 @@ import (
 	"github.com/Zouriel/zcoms-agent/internal/workspaces"
 	"github.com/Zouriel/zcoms-agent/scheduler"
 	"github.com/Zouriel/zcoms/client"
-	"github.com/Zouriel/zcoms/whatsapp"
 )
 
 // Agent is the unified runtime.
@@ -150,37 +149,13 @@ func (a *Agent) registerJobs() {
 	// edits (new group, schedule change, enable/disable) take effect live —
 	// no agent restart needed.
 	a.Sched.Interval("triage-dispatch", time.Minute, a.runDueTriageGroups)
+	// The bridge no longer polls the Baileys sidecar for WhatsApp: inbound WA now
+	// arrives over the daemon's in-process whatsmeow transport on the subscribe
+	// stream (Phase D), so a sidecar poll would double-handle every message.
+	// Errands still poll the sidecar until they're wired to the daemon WA feed.
 	a.Sched.Interval("wa-errand-poll", 25*time.Second, a.Errands.PollWhatsApp)
-	a.Sched.Interval("wa-bridge-poll", 20*time.Second, a.pollWhatsAppBridge)
 	a.Sched.Interval("scheduled-errands", 30*time.Second, a.Errands.FireDueScheduled)
 	a.Sched.Interval("workspace-discovery", 10*time.Minute, func() { _, _ = a.Registry.Sync() })
-}
-
-// pollWhatsAppBridge polls WhatsApp unread and feeds messages from allow-listed
-// numbers into the interactive bridge (WhatsApp has no real-time push, so the
-// bridge is poll-driven there). Messages claimed by an active errand are left to
-// the errands poll; everything else the bridge consumes is marked read.
-func (a *Agent) pollWhatsAppBridge() {
-	if !a.settings.WhatsApp.Enabled {
-		return
-	}
-	sock := a.settings.WhatsApp.Socket
-	unread, err := whatsapp.FetchUnread(sock)
-	if err != nil {
-		return
-	}
-	consumed := map[string][]string{}
-	for _, u := range unread {
-		if a.Errands.OwnsWA(u.ChatID) {
-			continue
-		}
-		if a.Bridge.HandleWhatsApp(u.ChatID, u.Text, u.File) {
-			consumed[u.ChatID] = append(consumed[u.ChatID], u.MsgID)
-		}
-	}
-	for jid, ids := range consumed {
-		_ = whatsapp.Dismiss(sock, jid, ids)
-	}
 }
 
 // transportOf returns the event's transport, defaulting to telegram for a
