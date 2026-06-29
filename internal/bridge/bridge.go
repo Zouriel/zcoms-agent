@@ -16,9 +16,16 @@ const telegramMaxLen = 4000
 type userState struct {
 	username string
 	entry    AllowEntry
-	chatID   int64  // Telegram chat id, or a WhatsApp session's synthetic (negative) id
-	platform string // "telegram" | "whatsapp"
-	waChat   string // WhatsApp jid for replies (platform=="whatsapp")
+
+	// Reply routing (Phase D): a session is keyed and answered by transport +
+	// native address, so a message on any connected app is answered on that same
+	// app. transport is "telegram" | "whatsapp" | "instagram"; address is the
+	// transport-native reply id (Telegram chat id string / WhatsApp JID / IG
+	// thread id); viaSidecar marks a legacy Baileys WhatsApp session whose
+	// replies go over the Node sidecar rather than the comms daemon.
+	transport  string
+	address    string
+	viaSidecar bool
 
 	location      string // active location name ("" = none picked)
 	locationPath  string
@@ -42,6 +49,21 @@ type userState struct {
 	triageSession    bool   // this session IS the persistent triage brain (interact triage)
 
 	teamSession bool // mid multi-turn zc-team conversation: route messages to team.sock
+}
+
+// route snapshots the session's reply destination (taken before any goroutine).
+func (st *userState) route() route {
+	return route{transport: st.transport, address: st.address, viaSidecar: st.viaSidecar}
+}
+
+// sessionKey is the byUser map key: one session per (transport, native id) so
+// the same person on different apps is tracked separately and never collides
+// across transports (Telegram user id vs WhatsApp number vs Instagram thread).
+func sessionKey(transport, nativeID string) string {
+	if transport == "" {
+		transport = "telegram"
+	}
+	return transport + "|" + nativeID
 }
 
 // RunDaemon resolves the allow-list, greets each member, then services incoming
@@ -81,16 +103,16 @@ func (d *Comp) handle(st *userState, text string) {
 	if busy {
 		// Allow only status while a run is in flight.
 		if lower == "status" {
-			d.send(st.chatID, d.statusLine(st))
+			d.send(st.route(), d.statusLine(st))
 			return
 		}
-		d.send(st.chatID, "⏳ Still working on your previous message — one moment.")
+		d.send(st.route(), "⏳ Still working on your previous message — one moment.")
 		return
 	}
 
 	switch lower {
 	case "help", "?", "/help", "start", "/start":
-		d.send(st.chatID, d.helpText(st))
+		d.send(st.route(), d.helpText(st))
 		return
 	case "locations", "loc", "/locations":
 		d.listLocations(st)
@@ -107,10 +129,10 @@ func (d *Comp) handle(st *userState, text string) {
 		st.triageReply, st.triageRecipients, st.triageSeed, st.triageSession = false, nil, "", false
 		st.forceBackend = ""
 		d.mu.Unlock()
-		d.send(st.chatID, "Detached. Send 'locations' to pick where to work.")
+		d.send(st.route(), "Detached. Send 'locations' to pick where to work.")
 		return
 	case "status", "/status":
-		d.send(st.chatID, d.statusLine(st))
+		d.send(st.route(), d.statusLine(st))
 		return
 	case "interact triage", "interact-triage", "triage-reply":
 		d.startTriageReply(st)
@@ -137,7 +159,7 @@ func (d *Comp) handle(st *userState, text string) {
 	awaiting := st.awaitingConfirm
 	d.mu.Unlock()
 	if loc == "" {
-		d.send(st.chatID, "Pick a location first — send 'locations'.")
+		d.send(st.route(), "Pick a location first — send 'locations'.")
 		return
 	}
 
@@ -159,7 +181,7 @@ func (d *Comp) handle(st *userState, text string) {
 			d.mu.Lock()
 			st.awaitingConfirm = false
 			d.mu.Unlock()
-			d.send(st.chatID, "Cancelled. Send a new message when ready.")
+			d.send(st.route(), "Cancelled. Send a new message when ready.")
 		default:
 			d.dispatchAgentTurn(st, text) // refine -> re-plan (attaches any files)
 		}
@@ -182,7 +204,7 @@ func (d *Comp) listLocations(st *userState) {
 		}
 	}
 	if len(allowed) == 0 {
-		d.send(st.chatID, "No locations are configured for you. (Edit agent-locations.json / your allowlist entry.)")
+		d.send(st.route(), "No locations are configured for you. (Edit agent-locations.json / your allowlist entry.)")
 		return
 	}
 
@@ -199,7 +221,7 @@ func (d *Comp) listLocations(st *userState) {
 	d.mu.Lock()
 	st.pendingKind, st.pendingLoc, st.pendingSess = "location", allowed, nil
 	d.mu.Unlock()
-	d.send(st.chatID, b.String())
+	d.send(st.route(), b.String())
 }
 
 func (d *Comp) listSessions(st *userState) {
@@ -207,17 +229,17 @@ func (d *Comp) listSessions(st *userState) {
 	loc, path := st.location, st.locationPath
 	d.mu.Unlock()
 	if loc == "" {
-		d.send(st.chatID, "Pick a location first — send 'locations'.")
+		d.send(st.route(), "Pick a location first — send 'locations'.")
 		return
 	}
 
 	sessions, err := ListSessionsFor(st.entry.Agent, path, 12)
 	if err != nil {
-		d.send(st.chatID, "⚠️ Couldn't list sessions: "+err.Error())
+		d.send(st.route(), "⚠️ Couldn't list sessions: "+err.Error())
 		return
 	}
 	if len(sessions) == 0 {
-		d.send(st.chatID, "No past sessions in "+loc+". Just send a message to start a new one.")
+		d.send(st.route(), "No past sessions in "+loc+". Just send a message to start a new one.")
 		return
 	}
 
@@ -229,7 +251,7 @@ func (d *Comp) listSessions(st *userState) {
 	d.mu.Lock()
 	st.pendingKind, st.pendingSess, st.pendingLoc = "session", sessions, nil
 	d.mu.Unlock()
-	d.send(st.chatID, b.String())
+	d.send(st.route(), b.String())
 }
 
 func (d *Comp) selectNumber(st *userState, n int) {
@@ -244,7 +266,7 @@ func (d *Comp) selectNumber(st *userState, n int) {
 	switch kind {
 	case "location":
 		if n < 1 || n > len(pendingLoc) {
-			d.send(st.chatID, "Out of range. Send 'locations' again.")
+			d.send(st.route(), "Out of range. Send 'locations' again.")
 			return
 		}
 		name := pendingLoc[n-1]
@@ -263,11 +285,11 @@ func (d *Comp) selectNumber(st *userState, n int) {
 		st.forceBackend = ""
 		st.triageSeed = d.seed(personas.Workspace)
 		d.mu.Unlock()
-		d.send(st.chatID, fmt.Sprintf("📍 %s (%s)\nRole here: %s\nSend 'resume' to continue a past session, or just send a message to start a new one.", name, cfg.Path, role))
+		d.send(st.route(), fmt.Sprintf("📍 %s (%s)\nRole here: %s\nSend 'resume' to continue a past session, or just send a message to start a new one.", name, cfg.Path, role))
 
 	case "session":
 		if n < 1 || n > len(pendingSess) {
-			d.send(st.chatID, "Out of range. Send 'resume' again.")
+			d.send(st.route(), "Out of range. Send 'resume' again.")
 			return
 		}
 		sess := pendingSess[n-1]
@@ -275,11 +297,11 @@ func (d *Comp) selectNumber(st *userState, n int) {
 		st.sessionID, st.pendingKind = sess.ID, ""
 		st.triageSeed = "" // resuming an established session — don't re-seed it
 		d.mu.Unlock()
-		d.send(st.chatID, fmt.Sprintf("↩️ Resuming: %s\nFetching a summary…", sess.Title))
+		d.send(st.route(), fmt.Sprintf("↩️ Resuming: %s\nFetching a summary…", sess.Title))
 		d.runAgent(st, "Briefly summarize in 2-4 sentences what we were last working on in this conversation and what the current state / next step is. Don't take any actions.", RoleRead, false)
 
 	default:
-		d.send(st.chatID, "Nothing to select. Send 'help'.")
+		d.send(st.route(), "Nothing to select. Send 'help'.")
 	}
 }
 
@@ -302,12 +324,11 @@ func (d *Comp) startChat(st *userState) {
 	st.triageSeed = d.seed(personas.Bridge)
 	role := st.effectiveRole
 	d.mu.Unlock()
-	d.send(st.chatID, fmt.Sprintf(
+	d.send(st.route(), fmt.Sprintf(
 		"💬 Chat on — general-purpose assistant in %s (role: %s).\n"+
 			"I can create/edit files, run commands, SSH into servers, etc. "+
 			"Send `new` to reset the session or `end` to detach.", home, role))
 }
-
 
 func (d *Comp) startNew(st *userState) {
 	d.mu.Lock()
@@ -315,10 +336,10 @@ func (d *Comp) startNew(st *userState) {
 	st.sessionID, st.pendingKind, st.awaitingConfirm = "", "", false
 	d.mu.Unlock()
 	if loc == "" {
-		d.send(st.chatID, "Pick a location first — send 'locations'.")
+		d.send(st.route(), "Pick a location first — send 'locations'.")
 		return
 	}
-	d.send(st.chatID, "🆕 New session in "+loc+". Send your first message.")
+	d.send(st.route(), "🆕 New session in "+loc+". Send your first message.")
 }
 
 // runAgent runs one agent turn in the background and posts the reply. When
@@ -334,7 +355,7 @@ func (d *Comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAft
 	}
 	st.busy = true
 	backend := st.backend
-	dir, resume, chatID := st.locationPath, st.sessionID, st.chatID
+	dir, resume, rt := st.locationPath, st.sessionID, st.route()
 	triageReply := st.triageReply
 	triageSession := st.triageSession
 	recipients := st.triageRecipients
@@ -351,14 +372,14 @@ func (d *Comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAft
 		d.mu.Lock()
 		st.busy = false
 		d.mu.Unlock()
-		d.send(chatID, "⚠️ Agent mode is unavailable — no `claude` or `codex` CLI is installed.")
+		d.send(rt, "⚠️ Agent mode is unavailable — no `claude` or `codex` CLI is installed.")
 		return true // turn consumed (nothing to retry)
 	}
 
 	if awaitConfirmAfter {
-		d.send(chatID, "🧭 planning…")
+		d.send(rt, "🧭 planning…")
 	} else {
-		d.send(chatID, "🤔 working…")
+		d.send(rt, "🤔 working…")
 	}
 
 	go func() {
@@ -371,7 +392,7 @@ func (d *Comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAft
 				d.mu.Lock()
 				st.busy = false
 				d.mu.Unlock()
-				d.send(chatID, "⚠️ Something went wrong handling that turn — please try again.")
+				d.send(rt, "⚠️ Something went wrong handling that turn — please try again.")
 			}
 		}()
 
@@ -422,7 +443,7 @@ func (d *Comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAft
 				if len(reads) == 0 {
 					break
 				}
-				d.send(chatID, "🔎 reading…")
+				d.send(rt, "🔎 reading…")
 				feedback := d.runTriageReads(reads)
 				res, err = RunAgent(backend, runDir, feedback, curSession, role, stagingWritable)
 				recordSession(res)
@@ -450,24 +471,24 @@ func (d *Comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAft
 
 		if err != nil {
 			if res.Text != "" {
-				d.send(chatID, res.Text)
+				d.send(rt, res.Text)
 			}
-			d.send(chatID, "⚠️ "+err.Error())
+			d.send(rt, "⚠️ "+err.Error())
 			return
 		}
 		if strings.TrimSpace(res.Text) == "" {
-			d.send(chatID, "(no output)")
+			d.send(rt, "(no output)")
 			return
 		}
 		if triageReply {
 			// Intercept SEND directives, route them to the batch's recipients,
 			// strip them from view, and post the result + send confirmations.
-			d.handleTriageReplyOutput(chatID, recipients, res.Text)
+			d.handleTriageReplyOutput(rt, recipients, res.Text)
 			return
 		}
-		d.send(chatID, res.Text)
+		d.send(rt, res.Text)
 		if awaitConfirmAfter {
-			d.send(chatID, "✅ Reply 'yes' to carry this out, 'no' to cancel, or send changes to refine the plan.")
+			d.send(rt, "✅ Reply 'yes' to carry this out, 'no' to cancel, or send changes to refine the plan.")
 		}
 	}()
 	return true

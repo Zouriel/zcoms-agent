@@ -35,13 +35,24 @@ type Comp struct {
 
 	mu       sync.Mutex
 	triageMu sync.Mutex
-	byUser   map[int64]*userState
+	byUser   map[string]*userState // keyed by sessionKey(transport, native id)
+}
 
-	// waChat maps a WhatsApp session's synthetic (negative) chat id to its jid,
-	// so the central send helpers can route replies over the sidecar without the
-	// ~57 call sites needing to know the platform.
-	waMu   sync.RWMutex
-	waChat map[int64]string
+// route is a snapshot of where a session's replies go. It is taken by value
+// (st.route()) before any goroutine so an in-flight reply can't race a later
+// inbound that mutates the session's address. The bridge routes every reply
+// through this: legacy Baileys WhatsApp over the sidecar, everything else over
+// the comms daemon on the message's own transport.
+type route struct {
+	transport  string // "telegram" | "whatsapp" | "instagram"
+	address    string // transport-native reply id (chat id string / JID / thread id)
+	viaSidecar bool   // legacy Node Baileys WhatsApp (reply over the sidecar, not the daemon)
+}
+
+// tgRoute builds a Telegram route from a numeric chat id (for fan-out sends that
+// resolve an @handle → chat id, e.g. triage replies).
+func tgRoute(chatID int64) route {
+	return route{transport: "telegram", address: strconv.FormatInt(chatID, 10)}
 }
 
 // seed returns a persona's owner-editable seed prompt, or "" when no accessor is
@@ -53,39 +64,42 @@ func (d *Comp) seed(key string) string {
 	return d.personaSeed(key)
 }
 
-func (d *Comp) send(chatID int64, text string) { _ = d.sendErr(chatID, text) }
+func (d *Comp) send(r route, text string) { _ = d.sendErr(r, text) }
 
-// waChatFor returns the WhatsApp jid for a session's synthetic chat id, or ""
-// when the id belongs to a Telegram session.
-func (d *Comp) waChatFor(chatID int64) string {
-	d.waMu.RLock()
-	defer d.waMu.RUnlock()
-	return d.waChat[chatID]
-}
-
-func (d *Comp) sendErr(chatID int64, text string) error {
-	if jid := d.waChatFor(chatID); jid != "" {
-		for _, part := range chunk(text, telegramMaxLen) {
-			if err := whatsapp.Send(d.waSocket, jid, part); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
+// sendErr posts text on the route's transport, splitting over the length limit.
+// Telegram and any daemon transport go through the comms client (Send/SendOn);
+// a legacy Baileys WhatsApp session replies over the sidecar.
+func (d *Comp) sendErr(r route, text string) error {
 	for _, part := range chunk(text, telegramMaxLen) {
-		if _, err := d.client.Send(strconv.FormatInt(chatID, 10), part); err != nil {
+		var err error
+		switch {
+		case r.viaSidecar:
+			err = whatsapp.Send(d.waSocket, r.address, part)
+		case r.transport == "" || r.transport == "telegram":
+			_, err = d.client.Send(r.address, part)
+		default:
+			_, err = d.client.SendOn(r.transport, r.address, part)
+		}
+		if err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (d *Comp) sendFileTG(chatID int64, path, caption string) (string, error) {
-	if jid := d.waChatFor(chatID); jid != "" {
-		return "", whatsapp.SendFile(d.waSocket, jid, path, caption)
+// sendFile uploads a file on the route's transport, returning the daemon's label
+// (empty for the sidecar path).
+func (d *Comp) sendFile(r route, path, caption string) (string, error) {
+	switch {
+	case r.viaSidecar:
+		return "", whatsapp.SendFile(d.waSocket, r.address, path, caption)
+	case r.transport == "" || r.transport == "telegram":
+		resp, err := d.client.SendFile(r.address, path, caption)
+		return resp.Label, err
+	default:
+		resp, err := d.client.SendFileOn(r.transport, r.address, path, caption)
+		return resp.Label, err
 	}
-	resp, err := d.client.SendFile(strconv.FormatInt(chatID, 10), path, caption)
-	return resp.Label, err
 }
 
 func (d *Comp) resolveChat(target string) (int64, int64, error) {
@@ -134,7 +148,7 @@ func (d *Comp) errandCommand(text string) string {
 
 // handleErrandCommand relays an `errand …` bridge command to the errands component.
 func (d *Comp) handleErrandCommand(st *userState, text string) {
-	d.send(st.chatID, d.errandCommand(text))
+	d.send(st.route(), d.errandCommand(text))
 }
 
 // isTeamCommand reports whether a message should be routed to the zc-team
@@ -158,13 +172,13 @@ func isTeamCommand(lower string) bool {
 func (d *Comp) handleTeamCommand(st *userState, text string) {
 	dir, err := runner.DefaultAppDir()
 	if err != nil {
-		d.send(st.chatID, "⚠️ "+err.Error())
+		d.send(st.route(), "⚠️ "+err.Error())
 		return
 	}
 	conn, err := net.DialTimeout("unix", filepath.Join(dir, "team.sock"), 2*time.Second)
 	if err != nil {
 		d.setTeamSession(st, false)
-		d.send(st.chatID, "The team component isn't running — install it with `zc install team`.")
+		d.send(st.route(), "The team component isn't running — install it with `zc install team`.")
 		return
 	}
 	defer conn.Close()
@@ -183,15 +197,15 @@ func (d *Comp) handleTeamCommand(st *userState, text string) {
 	}
 	if json.Unmarshal(line, &resp) != nil {
 		d.setTeamSession(st, false)
-		d.send(st.chatID, "⚠️ couldn't reach the team component")
+		d.send(st.route(), "⚠️ couldn't reach the team component")
 		return
 	}
 	d.setTeamSession(st, resp.Continue)
 	if !resp.OK {
-		d.send(st.chatID, "⚠️ "+resp.Error)
+		d.send(st.route(), "⚠️ "+resp.Error)
 		return
 	}
-	d.send(st.chatID, resp.Reply)
+	d.send(st.route(), resp.Reply)
 }
 
 func (d *Comp) setTeamSession(st *userState, on bool) {
@@ -217,12 +231,12 @@ func (d *Comp) handleCommerceCommand(st *userState, text string) {
 
 	dir, err := runner.DefaultAppDir()
 	if err != nil {
-		d.send(st.chatID, "⚠️ "+err.Error())
+		d.send(st.route(), "⚠️ "+err.Error())
 		return
 	}
 	conn, err := net.DialTimeout("unix", filepath.Join(dir, "commerce.sock"), 2*time.Second)
 	if err != nil {
-		d.send(st.chatID, "The commerce component isn't running — install it with `zc install commerce`.")
+		d.send(st.route(), "The commerce component isn't running — install it with `zc install commerce`.")
 		return
 	}
 	defer conn.Close()
@@ -239,14 +253,14 @@ func (d *Comp) handleCommerceCommand(st *userState, text string) {
 		Error string `json:"error"`
 	}
 	if json.Unmarshal(line, &resp) != nil {
-		d.send(st.chatID, "⚠️ couldn't reach the commerce component")
+		d.send(st.route(), "⚠️ couldn't reach the commerce component")
 		return
 	}
 	if !resp.OK {
-		d.send(st.chatID, "⚠️ "+resp.Error)
+		d.send(st.route(), "⚠️ "+resp.Error)
 		return
 	}
-	d.send(st.chatID, resp.Reply)
+	d.send(st.route(), resp.Reply)
 }
 
 // triage-session.json helpers (the bridge resumes/resets the shared triage brain

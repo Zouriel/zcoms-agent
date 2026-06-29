@@ -16,14 +16,14 @@ const uploadsSubdir = "zcoms-uploads"
 // attached to the user's next turn (or run now if there's a caption).
 func (d *Comp) handleIncomingFile(st *userState, localPath, fileName, caption string) {
 	d.mu.Lock()
-	loc, dir, chatID := st.location, st.locationPath, st.chatID
+	loc, dir, rt := st.location, st.locationPath, st.route()
 	d.mu.Unlock()
 	if loc == "" {
-		d.send(chatID, "Pick a location first (send 'locations'), then send the file — it needs a project to live in.")
+		d.send(rt, "Pick a location first (send 'locations'), then send the file — it needs a project to live in.")
 		return
 	}
 	if strings.TrimSpace(localPath) == "" {
-		d.send(chatID, "⚠️ I couldn't get that file.")
+		d.send(rt, "⚠️ I couldn't get that file.")
 		return
 	}
 	if fileName == "" {
@@ -32,7 +32,7 @@ func (d *Comp) handleIncomingFile(st *userState, localPath, fileName, caption st
 
 	rel := filepath.Join(uploadsSubdir, sanitizeFilename(fileName))
 	if err := copyInto(localPath, filepath.Join(dir, rel)); err != nil {
-		d.send(chatID, "⚠️ Couldn't save the file: "+err.Error())
+		d.send(rt, "⚠️ Couldn't save the file: "+err.Error())
 		return
 	}
 
@@ -41,10 +41,10 @@ func (d *Comp) handleIncomingFile(st *userState, localPath, fileName, caption st
 	d.mu.Unlock()
 
 	if strings.TrimSpace(caption) != "" {
-		d.send(chatID, "📎 Saved to "+rel+" — working on it…")
+		d.send(rt, "📎 Saved to "+rel+" — working on it…")
 		d.dispatchAgentTurn(st, caption)
 	} else {
-		d.send(chatID, "📎 Saved to "+rel+" — tell me what to do with it.")
+		d.send(rt, "📎 Saved to "+rel+" — tell me what to do with it.")
 	}
 }
 

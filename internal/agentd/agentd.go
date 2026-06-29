@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"github.com/Zouriel/zcoms-agent/internal/bootstrap"
-	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/bridge"
 	"github.com/Zouriel/zcoms-agent/internal/errands"
+	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/sessions"
 	"github.com/Zouriel/zcoms-agent/internal/store"
@@ -181,6 +181,15 @@ func (a *Agent) pollWhatsAppBridge() {
 	}
 }
 
+// transportOf returns the event's transport, defaulting to telegram for a
+// pre-v2 daemon that doesn't tag events.
+func transportOf(ev client.Event) string {
+	if ev.Transport == "" {
+		return "telegram"
+	}
+	return ev.Transport
+}
+
 // runTriageNow runs one triage pass immediately (the `triage now` command).
 func (a *Agent) runTriageNow(s runner.Settings) {
 	triage.RunOnce(a.Client, s, personas.SeedOr(a.Store, personas.Triage))
@@ -204,17 +213,34 @@ func triageInterval(schedule string) time.Duration {
 	}
 }
 
-// subscribe streams inbound 1:1 messages from the comms daemon and routes each:
-// a chat an active errand/interview owns goes to errands; an allow-listed sender
-// goes to the bridge; anything else is ignored (comms is a dumb pipe).
+// subscribe streams inbound 1:1 messages from the comms daemon (all transports)
+// and routes each: a chat an active errand/interview owns goes to errands; an
+// allow-listed sender goes to the bridge, which replies on the same transport;
+// anything else is ignored (comms is a dumb pipe). Own/self messages are dropped
+// so the agent never auto-replies to the owner's own outbound.
 func (a *Agent) subscribe(ctx context.Context) {
 	for ctx.Err() == nil {
 		err := a.Client.Subscribe("bridge", func(ev client.Event) {
-			if a.Errands.Owns(ev.ChatID) {
-				a.Errands.FeedTelegram(ev.ChatID, ev.MessageID, ev.Text, ev.File)
+			if ev.FromSelf {
 				return
 			}
-			a.Bridge.HandleEvent(ev)
+			switch transportOf(ev) {
+			case "whatsapp":
+				// Daemon-delivered WhatsApp (whatsmeow). Errands still own their
+				// WA contacts via the sidecar poll for now; until whatsmeow
+				// replaces the sidecar (and errands gains a daemon WA feed), an
+				// errand-owned number is left to that poll, everything else → bridge.
+				if a.Errands.OwnsWA(ev.Address) {
+					return
+				}
+				a.Bridge.HandleEvent(ev)
+			default: // telegram (Instagram joins the bridge path later)
+				if a.Errands.Owns(ev.ChatID) {
+					a.Errands.FeedTelegram(ev.ChatID, ev.MessageID, ev.Text, ev.File)
+					return
+				}
+				a.Bridge.HandleEvent(ev)
+			}
 		})
 		if ctx.Err() != nil {
 			return

@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/Zouriel/zcoms-agent/internal/runner"
@@ -39,8 +40,7 @@ func New(d Deps) *Comp {
 		settings:         d.Settings,
 		mainChatID:       d.MainChatID,
 		personaSeed:      d.PersonaSeed,
-		byUser:           map[int64]*userState{},
-		waChat:           map[int64]string{},
+		byUser:           map[string]*userState{},
 	}
 }
 
@@ -61,26 +61,54 @@ func (d *Comp) HandleEvent(ev client.Event) bool {
 }
 
 // stateFor returns (creating on first contact) the per-user session state for an
-// allow-listed sender, or nil if the sender isn't allow-listed.
+// allow-listed sender on whatever transport the event arrived on, or nil if the
+// sender isn't allow-listed. The reply address is refreshed each call so a reply
+// always returns on the same app — and transport — the message came in on.
 func (d *Comp) stateFor(ev client.Event) *userState {
+	tp := ev.Transport
+	if tp == "" {
+		tp = "telegram"
+	}
+
+	// Per transport: the allow-match handle, the stable session id, and the
+	// native reply address.
+	var matchHandle, nativeID, address string
+	switch tp {
+	case "whatsapp":
+		digits := WADigits(ev.Address)
+		matchHandle, nativeID, address = digits, digits, ev.Address
+	default: // telegram (Instagram joins here later)
+		matchHandle = ev.Sender
+		nativeID = strconv.FormatInt(ev.UserID, 10)
+		address = ev.Address
+		if address == "" {
+			address = strconv.FormatInt(ev.ChatID, 10)
+		}
+	}
+	if nativeID == "" || nativeID == "0" {
+		return nil
+	}
+
+	key := sessionKey(tp, nativeID)
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if st, ok := d.byUser[ev.UserID]; ok {
-		st.chatID = ev.ChatID
+	if st, ok := d.byUser[key]; ok {
+		st.address = address  // refresh reply target
+		st.viaSidecar = false // arrived over the daemon, not the legacy sidecar
 		return st
 	}
-	handle, entry, ok := d.lookupAllow("telegram", ev.Sender)
+	handle, entry, ok := d.lookupAllow(tp, matchHandle)
 	if !ok {
 		return nil
 	}
 	st := &userState{
-		username: handle, // the allow-list handle (canonical), not the raw event value
-		entry:    entry,
-		chatID:   ev.ChatID,
-		platform: "telegram",
-		backend:  d.agents.For("bridge", entry.Agent),
+		username:  handle, // the allow-list handle (canonical), not the raw event value
+		entry:     entry,
+		transport: tp,
+		address:   address,
+		backend:   d.agents.For("bridge", entry.Agent),
 	}
-	d.byUser[ev.UserID] = st
+	d.byUser[key] = st
 	return st
 }
 

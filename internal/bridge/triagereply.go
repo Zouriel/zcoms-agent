@@ -126,11 +126,11 @@ func (d *Comp) runTriageReads(reads []readRequest) string {
 func (d *Comp) startTriageReply(st *userState) {
 	batch, err := LoadTriageBatch()
 	if err != nil {
-		d.send(st.chatID, "⚠️ Couldn't load the last triage batch: "+err.Error())
+		d.send(st.route(), "⚠️ Couldn't load the last triage batch: "+err.Error())
 		return
 	}
 	if len(batch.Recipients) == 0 {
-		d.send(st.chatID, "Nothing to act on yet.")
+		d.send(st.route(), "Nothing to act on yet.")
 		return
 	}
 
@@ -151,7 +151,7 @@ func (d *Comp) startTriageReply(st *userState) {
 	if brainID == "" {
 		memory = "starting a fresh triage session"
 	}
-	d.send(st.chatID, fmt.Sprintf(
+	d.send(st.route(), fmt.Sprintf(
 		"🗂 Interactive triage on (%s) — %d recipient(s) from the last batch (%s).\nTell me who to reply to. `end` to finish.",
 		memory, len(batch.Recipients), humanAgo(batch.At)))
 }
@@ -160,7 +160,7 @@ func (d *Comp) startTriageReply(st *userState) {
 // fresh with no memory of past messages.
 func (d *Comp) resetTriageBrain(st *userState) {
 	if err := ResetTriageSession(); err != nil {
-		d.send(st.chatID, "⚠️ Couldn't reset triage memory: "+err.Error())
+		d.send(st.route(), "⚠️ Couldn't reset triage memory: "+err.Error())
 		return
 	}
 	d.mu.Lock()
@@ -169,7 +169,7 @@ func (d *Comp) resetTriageBrain(st *userState) {
 		st.triageReply, st.triageRecipients, st.triageSeed = false, nil, ""
 	}
 	d.mu.Unlock()
-	d.send(st.chatID, "🧹 Triage memory cleared. The next triage pass starts a fresh session.")
+	d.send(st.route(), "🧹 Triage memory cleared. The next triage pass starts a fresh session.")
 }
 
 // sendToRecipient sends body to one batch recipient on its origin platform and
@@ -184,7 +184,7 @@ func (d *Comp) sendToRecipient(rec Recipient, body string) string {
 			err = whatsapp.Send(d.waSocket, rec.WAChat, body)
 		}
 	default:
-		err = d.sendErr(rec.TGChat, body)
+		err = d.sendErr(tgRoute(rec.TGChat), body)
 	}
 	if err != nil {
 		return fmt.Sprintf("⚠️ Couldn't send to %s (%s): %v", rec.Name, platformLabel(rec.Source), err)
@@ -238,7 +238,7 @@ func (d *Comp) sendFileTo(byIndex map[int]Recipient, target, path, caption strin
 				}
 				return fmt.Sprintf("✅ Sent file to %s (WhatsApp)", rec.Name)
 			}
-			label, err := d.sendFileTG(rec.TGChat, full, caption)
+			label, err := d.sendFile(tgRoute(rec.TGChat), full, caption)
 			if err != nil {
 				return fmt.Sprintf("⚠️ Couldn't send file to %s: %v", rec.Name, err)
 			}
@@ -250,7 +250,7 @@ func (d *Comp) sendFileTo(byIndex map[int]Recipient, target, path, caption strin
 	if err != nil {
 		return fmt.Sprintf("⚠️ Couldn't resolve %q: %v", target, err)
 	}
-	label, err := d.sendFileTG(chat, full, caption)
+	label, err := d.sendFile(tgRoute(chat), full, caption)
 	if err != nil {
 		return fmt.Sprintf("⚠️ Couldn't send file to %s: %v", target, err)
 	}
@@ -315,7 +315,7 @@ func buildTriageSeed(recipients []Recipient) string {
 // handleTriageReplyOutput parses SEND directives out of one agent turn, routes
 // each to its recipient, strips them from the owner-facing text, and appends a
 // confirmation (or a clear error — never a false success) per send.
-func (d *Comp) handleTriageReplyOutput(chatID int64, recipients []Recipient, text string) {
+func (d *Comp) handleTriageReplyOutput(rt route, recipients []Recipient, text string) {
 	byIndex := make(map[int]Recipient, len(recipients))
 	for _, r := range recipients {
 		byIndex[r.Index] = r
@@ -363,7 +363,7 @@ func (d *Comp) handleTriageReplyOutput(chatID int64, recipients []Recipient, tex
 			confirmations = append(confirmations, fmt.Sprintf("⚠️ Couldn't resolve %q: %v", target, err))
 			continue
 		}
-		if err := d.sendErr(chatID, body); err != nil {
+		if err := d.sendErr(tgRoute(chatID), body); err != nil {
 			confirmations = append(confirmations, fmt.Sprintf("⚠️ Couldn't send to %s (Telegram): %v", target, err))
 			continue
 		}
@@ -380,5 +380,5 @@ func (d *Comp) handleTriageReplyOutput(chatID int64, recipients []Recipient, tex
 	if len(parts) == 0 {
 		parts = append(parts, "(no output)")
 	}
-	d.send(chatID, strings.Join(parts, "\n\n"))
+	d.send(rt, strings.Join(parts, "\n\n"))
 }
