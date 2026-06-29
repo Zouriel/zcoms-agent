@@ -31,9 +31,10 @@ type Comp struct {
 	mainChatID       int64
 	personaSeed      func(key string) string
 
-	mu       sync.Mutex
-	triageMu sync.Mutex
-	byUser   map[string]*userState // keyed by sessionKey(transport, native id)
+	mu          sync.Mutex
+	triageMu    sync.Mutex
+	byUser      map[string]*userState // keyed by sessionKey(transport, native id)
+	autoReplied map[string]bool       // non-allow-listed senders already sent the canned ack
 }
 
 // route is a snapshot of where a session's replies go. It is taken by value
