@@ -33,6 +33,23 @@ type AllowEntry struct {
 	MaxRole  string `json:"max_role"`
 }
 
+type TriageSource struct {
+	ID         int64  `json:"id,omitempty"`
+	Transport  string `json:"transport"`
+	Account    string `json:"account,omitempty"`
+	ChatFilter string `json:"chat_filter,omitempty"`
+}
+
+type TriageGroup struct {
+	ID           int64          `json:"id"`
+	Name         string         `json:"name"`
+	ScheduleKind string         `json:"schedule_kind"`
+	ScheduleSpec string         `json:"schedule_spec"`
+	Enabled      bool           `json:"enabled"`
+	LastRunAt    string         `json:"last_run_at,omitempty"`
+	Sources      []TriageSource `json:"sources"`
+}
+
 type Session struct {
 	ExternalID string `json:"external_id"`
 	Title      string `json:"title"`
@@ -70,6 +87,12 @@ func (c *Client) QueryAllowlist() ([]AllowEntry, error) {
 func (c *Client) QuerySettings() (map[string]string, error) {
 	out := map[string]string{}
 	return out, c.queryJSON("settings", &out)
+}
+
+// TriageGroups returns the triage groups (with their sources).
+func (c *Client) QueryTriageGroups() ([]TriageGroup, error) {
+	var out []TriageGroup
+	return out, c.queryJSON("triage-groups", &out)
 }
 
 // Sessions returns the live sessions (decorated) for a workspace id.

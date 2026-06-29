@@ -119,6 +119,21 @@ CREATE TABLE IF NOT EXISTS allowlist (
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
+);
+CREATE TABLE IF NOT EXISTS triage_groups (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  schedule_kind TEXT NOT NULL DEFAULT 'interval',  -- 'interval' | 'daily'
+  schedule_spec TEXT NOT NULL DEFAULT '1h',        -- '1h' | '09:00,18:00'
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_run_at TEXT
+);
+CREATE TABLE IF NOT EXISTS triage_group_sources (
+  id INTEGER PRIMARY KEY,
+  group_id INTEGER NOT NULL REFERENCES triage_groups(id) ON DELETE CASCADE,
+  transport TEXT NOT NULL,          -- 'telegram'|'whatsapp'|'instagram'
+  account TEXT,                     -- which connected account (if >1)
+  chat_filter TEXT                  -- optional include/exclude
 );`)
 	return err
 }

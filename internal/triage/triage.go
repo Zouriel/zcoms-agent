@@ -18,21 +18,29 @@ import (
 
 // message is one unread item from either platform, unified for triage.
 type message struct {
-	Sender string
-	Text   string
-	When   time.Time
-	Source string // "tg" | "wa"
-	TGChat int64
-	TGMsg  int64
-	WAChat string
-	WAMsg  string
-	File   string
+	Sender   string
+	Text     string
+	When     time.Time
+	Source   string // "tg" | "wa"
+	TGChat   int64
+	TGMsg    int64
+	WAChat   string
+	WAMsg    string
+	File     string
+	FromSelf bool // the connected account's own message (never triaged)
 }
 
-// runOnce performs one triage pass: gather unread (Telegram via IPC, WhatsApp
-// via the sidecar), ask the agent which matter, DM the owner a digest, persist
-// the batch for `interact triage`, and mark everything read.
+// runOnce performs one triage pass over ALL connected transports (the legacy
+// single-schedule path / `triage now`). It delegates to runGroup with no label.
 func runOnce(c *client.Client, s runner.Settings, seed string) {
+	runGroup(c, s, seed, "", allTransports(s))
+}
+
+// runGroup performs one triage pass for a set of transports (a triage group):
+// gather unread only from those transports, drop the owner's own messages, ask
+// the agent which matter, DM the owner a digest (labeled with the group name),
+// persist the batch for `interact triage`, and mark everything read.
+func runGroup(c *client.Client, s runner.Settings, seed, label string, transports map[string]bool) {
 	if s.MainUser == "" || s.MainUser == "@your_username" {
 		log.Println("[triage] main_user not set — nowhere to send a digest; skipping")
 		return
@@ -42,11 +50,15 @@ func runOnce(c *client.Client, s runner.Settings, seed string) {
 		return
 	}
 
-	msgs, err := collectUnread(c, s)
+	msgs, err := collectUnreadFiltered(c, s, transports)
 	if err != nil {
 		log.Printf("[triage] couldn't read unread (is the bridge daemon running?): %v", err)
 		return
 	}
+	// Hard filter, in ONE place: never ingest the owner's own outbound / self
+	// messages on any transport (prevents noise and the feedback loop where the
+	// agent's own sends get re-triaged). Holds for every group and transport.
+	msgs = dropSelf(msgs, s)
 	if len(msgs) == 0 {
 		return
 	}
@@ -94,7 +106,11 @@ func runOnce(c *client.Client, s runner.Settings, seed string) {
 	// Notify first; if the digest fails to send, leave everything unread so the
 	// next pass retries (don't lose important messages).
 	if len(bullets) > 0 {
-		digest := "\U0001F4E8 Messages worth your attention:\n" + strings.Join(bullets, "\n") +
+		header := "\U0001F4E8 Messages worth your attention:\n"
+		if label != "" {
+			header = "\U0001F4E8 " + label + " — messages worth your attention:\n"
+		}
+		digest := header + strings.Join(bullets, "\n") +
 			"\n\nReply `interact triage` to act on these."
 		if _, err := c.Send(s.MainUser, digest); err != nil {
 			log.Printf("[triage] digest send failed (leaving unread to retry): %v", err)
@@ -117,24 +133,37 @@ func runOnce(c *client.Client, s runner.Settings, seed string) {
 	}
 }
 
-// collectUnread merges Telegram unread (from the daemon over IPC) with WhatsApp
-// unread (from the sidecar directly, when enabled).
-func collectUnread(c *client.Client, s runner.Settings) ([]message, error) {
-	tg, err := c.Unread()
-	if err != nil {
-		return nil, err
-	}
-	var msgs []message
-	for _, it := range tg {
-		msgs = append(msgs, message{
-			Sender: it.Sender, Text: it.Text, When: time.Unix(it.When, 0),
-			Source: "tg", TGChat: it.ChatID, TGMsg: it.MsgID,
-		})
-	}
+// allTransports returns the set of connected transports for the legacy
+// all-sources pass (Telegram always; WhatsApp when enabled).
+func allTransports(s runner.Settings) map[string]bool {
+	t := map[string]bool{"telegram": true}
 	if s.WhatsApp.Enabled {
+		t["whatsapp"] = true
+	}
+	return t
+}
+
+// collectUnreadFiltered merges unread from only the requested transports:
+// Telegram (from the daemon over IPC) and WhatsApp (from the sidecar, when
+// enabled). transports keys are "telegram" | "whatsapp" | "instagram".
+func collectUnreadFiltered(c *client.Client, s runner.Settings, transports map[string]bool) ([]message, error) {
+	var msgs []message
+	if transports["telegram"] {
+		tg, err := c.Unread()
+		if err != nil {
+			return nil, err
+		}
+		for _, it := range tg {
+			msgs = append(msgs, message{
+				Sender: it.Sender, Text: it.Text, When: time.Unix(it.When, 0),
+				Source: "tg", TGChat: it.ChatID, TGMsg: it.MsgID,
+			})
+		}
+	}
+	if transports["whatsapp"] && s.WhatsApp.Enabled {
 		wa, err := whatsapp.FetchUnread(s.WhatsApp.Socket)
 		if err != nil {
-			log.Printf("[triage] whatsapp unavailable, skipping (tg only): %v", err)
+			log.Printf("[triage] whatsapp unavailable, skipping: %v", err)
 		} else {
 			for _, u := range wa {
 				msgs = append(msgs, message{
@@ -145,6 +174,27 @@ func collectUnread(c *client.Client, s runner.Settings) ([]message, error) {
 		}
 	}
 	return msgs, nil
+}
+
+// dropSelf removes the owner's own / self messages — the single ingestion-time
+// filter that keeps triage to "what others sent me". It drops anything a
+// transport marked FromSelf, plus (defensively) Telegram messages whose sender
+// is the owner's own main-account handle. Telegram unread is already
+// incoming-only, so this is mostly forward cover for transports that surface
+// self-chats; the in-process transports tag FromSelf at the source.
+func dropSelf(msgs []message, s runner.Settings) []message {
+	self := strings.ToLower(strings.TrimSpace(s.MainUser))
+	out := msgs[:0]
+	for _, m := range msgs {
+		if m.FromSelf {
+			continue
+		}
+		if self != "" && m.Source == "tg" && strings.ToLower(strings.TrimSpace(m.Sender)) == self {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func buildPrompt(msgs []message) string {

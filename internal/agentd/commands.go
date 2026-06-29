@@ -62,6 +62,8 @@ func (a *Agent) jsonQuery(args []string) (string, error) {
 		v, err = a.Store.ListPersonas()
 	case "allowlist":
 		v, err = a.Store.ListAllow()
+	case "triage-groups":
+		v, err = a.Store.ListTriageGroups()
 	case "settings":
 		v, err = a.Store.ListSettings()
 	case "sessions":
@@ -366,8 +368,80 @@ func (a *Agent) triageCmd(args []string) (string, error) {
 	case "now":
 		go func() { s, _ := a.buildSettings(); a.runTriageNow(s) }()
 		return "Running a triage pass now…", nil
+	case "group", "groups":
+		return a.triageGroupCmd(args)
 	default:
 		return "Triage schedule set (restart to apply).", a.Store.SetSetting(store.Owner, "triage_schedule", args[0])
+	}
+}
+
+// triageGroupCmd is the owner CRUD surface for triage groups (used by the
+// console). `save` takes the full group as JSON (create when id==0, else
+// replace, sources and all). args = ["group", sub, …].
+func (a *Agent) triageGroupCmd(args []string) (string, error) {
+	if len(args) < 2 {
+		groups, err := a.Store.ListTriageGroups()
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d triage group(s).", len(groups)), nil
+	}
+	switch args[1] {
+	case "list":
+		groups, err := a.Store.ListTriageGroups()
+		if err != nil {
+			return "", err
+		}
+		var b strings.Builder
+		for _, g := range groups {
+			state := "off"
+			if g.Enabled {
+				state = "on"
+			}
+			fmt.Fprintf(&b, "#%d %s [%s] %s/%s — %d source(s)\n", g.ID, g.Name, state, g.ScheduleKind, g.ScheduleSpec, len(g.Sources))
+		}
+		if b.Len() == 0 {
+			return "No triage groups.", nil
+		}
+		return strings.TrimRight(b.String(), "\n"), nil
+	case "save":
+		raw := strings.TrimSpace(strings.Join(args[2:], " "))
+		if raw == "" {
+			return "", fmt.Errorf("usage: triage group save <json>")
+		}
+		var g store.TriageGroup
+		if err := json.Unmarshal([]byte(raw), &g); err != nil {
+			return "", fmt.Errorf("bad group json: %w", err)
+		}
+		saved, err := a.Store.SaveTriageGroup(store.Owner, g)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Saved triage group %q (id %d).", saved.Name, saved.ID), nil
+	case "rm", "remove", "delete":
+		id, err := strconv.ParseInt(args[2], 10, 64)
+		if err != nil {
+			return "", fmt.Errorf("usage: triage group rm <id>")
+		}
+		return "Removed.", a.Store.DeleteTriageGroup(store.Owner, id)
+	case "enable", "disable":
+		if len(args) < 3 {
+			return "", fmt.Errorf("usage: triage group %s <id>", args[1])
+		}
+		id, err := strconv.ParseInt(args[2], 10, 64)
+		if err != nil {
+			return "", err
+		}
+		on := args[1] == "enable"
+		if err := a.Store.SetTriageGroupEnabled(store.Owner, id, on); err != nil {
+			return "", err
+		}
+		if on {
+			return "Group enabled.", nil
+		}
+		return "Group disabled.", nil
+	default:
+		return "", fmt.Errorf("unknown triage group command %q", args[1])
 	}
 }
 

@@ -133,21 +133,23 @@ func (a *Agent) buildRuntimes() error {
 		PersonaSeed: seedFn,
 	})
 	a.Errands = errands.New(a.Client, settings.WhatsApp.Socket, settings.WhatsApp.Enabled, agents, mainChat, seedFn)
+
+	// Migrate the legacy single triage schedule into a "Default" group on first
+	// run (idempotent — only seeds when no groups exist yet).
+	if err := a.Store.EnsureDefaultTriageGroup(settings.Triage.Schedule, settings.Triage.Enabled, settings.WhatsApp.Enabled); err != nil {
+		a.log.Printf("triage default group: %v", err)
+	}
 	return nil
 }
 
 // registerJobs wires the scheduler's consumers: triage interval, WhatsApp
 // errand-reply poll, due scheduled errands, and periodic workspace discovery.
 func (a *Agent) registerJobs() {
-	if a.settings.Triage.Enabled {
-		d := triageInterval(a.settings.Triage.Schedule)
-		a.Sched.Interval("triage", d, func() {
-			s, _ := a.buildSettings()
-			if s.Triage.Enabled {
-				triage.RunOnce(a.Client, s, personas.SeedOr(a.Store, personas.Triage))
-			}
-		})
-	}
+	// One dispatch tick reads the triage groups every minute and runs whichever
+	// are due on their own schedule. Reading the DB each tick means console
+	// edits (new group, schedule change, enable/disable) take effect live —
+	// no agent restart needed.
+	a.Sched.Interval("triage-dispatch", time.Minute, a.runDueTriageGroups)
 	a.Sched.Interval("wa-errand-poll", 25*time.Second, a.Errands.PollWhatsApp)
 	a.Sched.Interval("wa-bridge-poll", 20*time.Second, a.pollWhatsAppBridge)
 	a.Sched.Interval("scheduled-errands", 30*time.Second, a.Errands.FireDueScheduled)
@@ -190,9 +192,98 @@ func transportOf(ev client.Event) string {
 	return ev.Transport
 }
 
-// runTriageNow runs one triage pass immediately (the `triage now` command).
+// runDueTriageGroups runs every enabled triage group whose schedule is due,
+// recording each run time. Called once a minute by the dispatch tick.
+func (a *Agent) runDueTriageGroups() {
+	groups, err := a.Store.ListTriageGroups()
+	if err != nil {
+		a.log.Printf("triage dispatch: %v", err)
+		return
+	}
+	s, _ := a.buildSettings()
+	now := time.Now()
+	seed := personas.SeedOr(a.Store, personas.Triage)
+	for _, g := range groups {
+		if !g.Enabled || !triageGroupDue(g, now) {
+			continue
+		}
+		a.runTriageGroup(s, seed, g, now)
+	}
+}
+
+// runTriageGroup triages one group's sources and stamps its last-run time.
+func (a *Agent) runTriageGroup(s runner.Settings, seed string, g store.TriageGroup, now time.Time) {
+	transports := map[string]bool{}
+	for _, src := range g.Sources {
+		transports[src.Transport] = true
+	}
+	if len(transports) == 0 {
+		return
+	}
+	triage.RunGroup(a.Client, s, seed, g.Name, transports)
+	_ = a.Store.MarkTriageGroupRan(g.ID, now.UTC().Format(time.RFC3339))
+}
+
+// runTriageNow runs every enabled group immediately (the `triage now` command).
 func (a *Agent) runTriageNow(s runner.Settings) {
-	triage.RunOnce(a.Client, s, personas.SeedOr(a.Store, personas.Triage))
+	groups, _ := a.Store.ListTriageGroups()
+	seed := personas.SeedOr(a.Store, personas.Triage)
+	now := time.Now()
+	ran := false
+	for _, g := range groups {
+		if g.Enabled {
+			a.runTriageGroup(s, seed, g, now)
+			ran = true
+		}
+	}
+	if !ran {
+		// No groups configured/enabled — fall back to an all-sources pass.
+		triage.RunOnce(a.Client, s, seed)
+	}
+}
+
+// triageGroupDue reports whether a group should run now given its schedule and
+// last run. interval specs ("30m"/"1h"/…) fire every duration; daily specs
+// ("09:00,18:00") fire once per listed local time per day.
+func triageGroupDue(g store.TriageGroup, now time.Time) bool {
+	last := parseRFC3339(g.LastRunAt)
+	if g.ScheduleKind == "daily" {
+		for _, hm := range strings.Split(g.ScheduleSpec, ",") {
+			t, ok := todayAt(strings.TrimSpace(hm), now)
+			if !ok {
+				continue
+			}
+			if !now.Before(t) && last.Before(t) {
+				return true
+			}
+		}
+		return false
+	}
+	d := triageInterval(g.ScheduleSpec)
+	if last.IsZero() {
+		return true
+	}
+	return now.Sub(last) >= d
+}
+
+// todayAt returns today's local time at "HH:MM", or ok=false on a bad spec.
+func todayAt(hm string, now time.Time) (time.Time, bool) {
+	var h, m int
+	if _, err := fmt.Sscanf(hm, "%d:%d", &h, &m); err != nil || h < 0 || h > 23 || m < 0 || m > 59 {
+		return time.Time{}, false
+	}
+	return time.Date(now.Year(), now.Month(), now.Day(), h, m, 0, 0, now.Location()), true
+}
+
+func parseRFC3339(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
 
 // triageInterval maps a schedule keyword to a poll interval (default 1h).
