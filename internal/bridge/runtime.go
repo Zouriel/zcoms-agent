@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Zouriel/zcoms-agent/internal/reminders"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms/client"
 )
@@ -21,6 +22,9 @@ type Deps struct {
 	// PersonaSeed returns a persona's owner-editable seed prompt (from agent.db),
 	// read live per call so console edits take effect without a restart. May be nil.
 	PersonaSeed func(key string) string
+	// Reminders is the in-process reminder loop the `remind …` command drives. May
+	// be nil (then the command replies that reminders are unavailable).
+	Reminders *reminders.Comp
 }
 
 // New builds the interactive bridge runtime for the unified agent process.
@@ -38,6 +42,7 @@ func New(d Deps) *Comp {
 		settings:         d.Settings,
 		mainChatID:       d.MainChatID,
 		personaSeed:      d.PersonaSeed,
+		reminders:        d.Reminders,
 		byUser:           map[string]*userState{},
 	}
 }

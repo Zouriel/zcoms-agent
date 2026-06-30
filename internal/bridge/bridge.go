@@ -81,6 +81,15 @@ func (d *Comp) handle(st *userState, text string) {
 		return
 	}
 
+	// Reminders (`remind <who> to <task>`, `remind list`, `remind cancel <id>`)
+	// run in-process; they don't touch the user's own agent session, so handle
+	// them before the busy gate like errand commands.
+	if lower == "remind" || lower == "reminder" || lower == "reminders" ||
+		strings.HasPrefix(lower, "remind ") || strings.HasPrefix(lower, "reminder ") {
+		d.handleRemindCommand(st, strings.TrimSpace(text))
+		return
+	}
+
 	// zc-team commands (and any ongoing multi-turn team conversation) are
 	// forwarded to the team component, which holds the conversation state.
 	if st.teamSession || isTeamCommand(lower) {

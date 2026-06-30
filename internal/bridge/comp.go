@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Zouriel/zcoms-agent/internal/reminders"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms/client"
 )
@@ -30,6 +31,7 @@ type Comp struct {
 	settings         Settings
 	mainChatID       int64
 	personaSeed      func(key string) string
+	reminders        *reminders.Comp // in-process reminder loop (may be nil)
 
 	mu       sync.Mutex
 	triageMu sync.Mutex
@@ -146,6 +148,33 @@ func (d *Comp) errandCommand(text string) string {
 // handleErrandCommand relays an `errand …` bridge command to the errands component.
 func (d *Comp) handleErrandCommand(st *userState, text string) {
 	d.send(st.route(), d.errandCommand(text))
+}
+
+// handleRemindCommand runs a `remind …` command from an allow-listed user against
+// the in-process reminders runtime (not over a socket — reminders runs in the
+// same agent process), replying on the user's own transport.
+func (d *Comp) handleRemindCommand(st *userState, text string) {
+	if d.reminders == nil {
+		d.send(st.route(), "Reminders aren't available right now.")
+		return
+	}
+	d.send(st.route(), d.reminders.HandleCommand(d.requesterFor(st), text))
+}
+
+// requesterFor builds the reminder requester identity from a bridge session: the
+// reply address and transport are the session's, and the requester is the owner
+// when their handle matches main_user.
+func (d *Comp) requesterFor(st *userState) reminders.Requester {
+	d.mu.Lock()
+	owner := strings.TrimSpace(d.settings.MainUser)
+	d.mu.Unlock()
+	return reminders.Requester{
+		Transport: st.transport,
+		Handle:    st.username,
+		Address:   st.address,
+		Name:      st.username,
+		Owner:     owner != "" && strings.EqualFold(strings.TrimSpace(st.username), owner),
+	}
 }
 
 // isTeamCommand reports whether a message should be routed to the zc-team

@@ -23,6 +23,8 @@ func (a *Agent) dispatch(text string) (string, error) {
 	switch verb {
 	case "errand", "errands":
 		return a.Errands.HandleCommand(text), nil
+	case "remind", "reminder", "reminders":
+		return a.Reminders.HandleCommand(a.ownerRequester(), text), nil
 	case "agent":
 		if len(rest) == 0 {
 			return "", fmt.Errorf("usage: agent workspace|session|persona|allowlist <…>")

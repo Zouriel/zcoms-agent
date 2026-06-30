@@ -19,6 +19,7 @@ import (
 	"github.com/Zouriel/zcoms-agent/internal/bridge"
 	"github.com/Zouriel/zcoms-agent/internal/errands"
 	"github.com/Zouriel/zcoms-agent/internal/personas"
+	"github.com/Zouriel/zcoms-agent/internal/reminders"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/sessions"
 	"github.com/Zouriel/zcoms-agent/internal/store"
@@ -35,8 +36,9 @@ type Agent struct {
 	Sessions *sessions.Manager
 	Sched    *scheduler.Scheduler
 	Client   *client.Client
-	Bridge   *bridge.Comp
-	Errands  *errands.Comp
+	Bridge    *bridge.Comp
+	Errands   *errands.Comp
+	Reminders *reminders.Comp
 
 	settings runner.Settings
 	log      *log.Logger
@@ -126,10 +128,14 @@ func (a *Agent) buildRuntimes() error {
 	// console edits take effect without a restart.
 	seedFn := func(key string) string { return personas.SeedOr(a.Store, key) }
 
+	// Reminders is built before the bridge so the bridge can drive it in-process
+	// for `remind …` commands.
+	a.Reminders = reminders.New(a.Client, a.Store, agents, settings.MainUser, mainChat, seedFn, nil)
+
 	a.Bridge = bridge.New(bridge.Deps{
 		Client: a.Client, WAEnabled: settings.WhatsApp.Enabled,
 		Locations: locs, Allow: allow, Agents: agents, Settings: settings, MainChatID: mainChat,
-		PersonaSeed: seedFn,
+		PersonaSeed: seedFn, Reminders: a.Reminders,
 	})
 	a.Errands = errands.New(a.Client, settings.WhatsApp.Enabled, agents, mainChat, seedFn)
 
@@ -154,6 +160,13 @@ func (a *Agent) registerJobs() {
 	// polls — the Node Baileys sidecar is retired.
 	a.Sched.Interval("scheduled-errands", 30*time.Second, a.Errands.FireDueScheduled)
 	a.Sched.Interval("workspace-discovery", 10*time.Minute, func() { _, _ = a.Registry.Sync() })
+}
+
+// ownerRequester builds the reminder requester for the agent.sock/CLI path: the
+// caller of a 0600 socket is always the owner, so "remind me …" addresses the
+// owner's own chat (resolved by the reminders runtime when the address is blank).
+func (a *Agent) ownerRequester() reminders.Requester {
+	return reminders.Requester{Transport: "telegram", Handle: a.settings.MainUser, Name: "you", Owner: true}
 }
 
 // reloadAllow rebuilds the allowlist from agent.db and pushes it into the live
