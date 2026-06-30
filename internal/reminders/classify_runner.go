@@ -106,8 +106,9 @@ func buildReplyPrompt(task, reply string) string {
 		"A reminder was set for this task: " + quote(task) + ".",
 		"The reminded person replied: " + quote(reply) + ".",
 		"",
-		"Reply with EXACTLY these two lines and nothing else:",
-		"DONE: yes | no   (yes only if the task is actually finished)",
+		"Reply with EXACTLY these three lines and nothing else:",
+		"DONE: yes | no   (yes ONLY if the task is actually finished — NOT for a mere 'ok'/'will do')",
+		"ACK: yes | no    (yes if they only acknowledged or agreed — 'ok', 'okay', 'sure', 'will do', 'on it' — without saying it's finished)",
 		"NEXT: integer minutes until the next nudge if NOT done and worth chasing, else none",
 	}, "\n")
 }
@@ -178,6 +179,12 @@ func parseReply(text string, base ReplyVerdict) ReplyVerdict {
 	v := base
 	if done, ok := f["done"]; ok {
 		v.Positive = isYes(done)
+	}
+	if ack, ok := f["ack"]; ok {
+		v.Ack = isYes(ack)
+	}
+	if v.Positive {
+		v.Ack = false // a real completion overrides an ack flag
 	}
 	if nx, ok := f["next"]; ok && !strings.EqualFold(nx, "none") {
 		if n, ok := firstInt(nx); ok && n > 0 {

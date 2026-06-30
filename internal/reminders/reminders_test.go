@@ -80,14 +80,24 @@ func TestHeuristicClassifyReply(t *testing.T) {
 	h := heuristic{}
 	pos := []string{"done", "yes did it", "bought it", "all sent ✅", "yeah finished"}
 	neg := []string{"not yet", "no", "didn't get to it", "haven't", "later", "still need to"}
+	ack := []string{"ok", "okay", "sure", "will do", "on it", "got it", "alright", "👍"}
 	for _, r := range pos {
-		if !h.ClassifyReply("buy a rose", r).Positive {
-			t.Errorf("reply %q classified negative, want positive", r)
+		v := h.ClassifyReply("buy a rose", r)
+		if !v.Positive || v.Ack {
+			t.Errorf("reply %q = %+v, want positive", r, v)
 		}
 	}
 	for _, r := range neg {
-		if h.ClassifyReply("buy a rose", r).Positive {
-			t.Errorf("reply %q classified positive, want negative", r)
+		v := h.ClassifyReply("buy a rose", r)
+		if v.Positive || v.Ack {
+			t.Errorf("reply %q = %+v, want negative", r, v)
+		}
+	}
+	// Acknowledgments are neither done nor a refusal — the "okay = done" bug.
+	for _, r := range ack {
+		v := h.ClassifyReply("buy a rose", r)
+		if !v.Ack || v.Positive {
+			t.Errorf("reply %q = %+v, want Ack", r, v)
 		}
 	}
 }

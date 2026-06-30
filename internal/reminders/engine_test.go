@@ -47,11 +47,12 @@ func (f *fakeClient) lastText() string {
 type fakeClassifier struct {
 	dec      Decision
 	positive bool
+	ack      bool
 }
 
 func (f *fakeClassifier) Classify(string, time.Time) Decision { return f.dec }
 func (f *fakeClassifier) ClassifyReply(string, string) ReplyVerdict {
-	return ReplyVerdict{Positive: f.positive}
+	return ReplyVerdict{Positive: f.positive, Ack: f.ack}
 }
 
 func newTestComp(t *testing.T, clf Classifier) (*Comp, *fakeClient, *store.Store) {
@@ -125,6 +126,30 @@ func TestRoseUntilDone(t *testing.T) {
 	d.FeedTelegram(100, "done")
 	if got := reload(t, st, r.ID); got.State != store.ReminderDone {
 		t.Fatalf("after positive: %s", got.State)
+	}
+}
+
+// TestAckDoesNotClose: replying "okay" to a nudge acknowledges without closing
+// or snoozing — the reminder stays engaged and keeps its schedule.
+func TestAckDoesNotClose(t *testing.T) {
+	clf := &fakeClassifier{} // fakeClassifier returns Ack for ack-ish replies below
+	d, _, st := newTestComp(t, clf)
+	now := time.Now()
+	r, _ := st.CreateReminder(store.Reminder{
+		RequesterAddr: "telegram|@me", TargetTransport: "telegram", TargetAddr: "600",
+		TargetName: "you", TaskText: "drink water", Kind: "oneoff",
+		State: store.ReminderPreReminded, NextAt: rfc(now.Add(time.Hour)),
+	})
+	clf.ack = true
+	if !d.FeedTelegram(600, "okay") {
+		t.Fatal("ack not consumed")
+	}
+	got := reload(t, st, r.ID)
+	if got.State != store.ReminderPreReminded {
+		t.Fatalf("ack should keep state pre_reminded, got %s", got.State)
+	}
+	if got.LastReply != "okay" {
+		t.Fatalf("ack should record last_reply, got %q", got.LastReply)
 	}
 }
 

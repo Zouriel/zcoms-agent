@@ -19,9 +19,13 @@ type Decision struct {
 	RecurSpec     string        // "daily HH:MM" | "weekdays HH:MM" (recurring)
 }
 
-// ReplyVerdict is the negative/positive read of a confirm reply (§4.3).
+// ReplyVerdict is the read of a confirm reply (§4.3). A reply is one of three
+// things: the task is actually done (Positive), they only acknowledged without
+// doing it (Ack — "ok", "will do", "on it"), or it's still not done (neither).
+// An Ack must NOT close the reminder — that was the "okay = done" bug.
 type ReplyVerdict struct {
-	Positive bool          // the task is done
+	Positive bool          // the task is genuinely done
+	Ack      bool          // a bare acknowledgment, not a completion
 	NewGap   time.Duration // negative + until-done: gap before the next nudge (0 = default)
 }
 
@@ -50,8 +54,10 @@ var (
 	recurRe     = regexp.MustCompile(`(?i)\b(every|each|daily|everyday|weekly|weekday|weekdays|each day|every day)\b`)
 	weekdayRe   = regexp.MustCompile(`(?i)\b(weekday|weekdays|every weekday)\b`)
 	eventWordRe = regexp.MustCompile(`(?i)\b(meeting|meet|sync|call|appointment|appt|flight|interview|deadline|due|class|session|standup|stand-up|doctor|dentist|webinar|demo|presentation|review|catch-?up)\b`)
-	posRe       = regexp.MustCompile(`(?i)(\bdone\b|\bdid\b|\byes\b|\byeah\b|\byep\b|\bbought\b|\bsent\b|\bfinished\b|\bcomplete|\bgot it\b|\bhandled\b|already|✅|👍)`)
-	negRe       = regexp.MustCompile(`(?i)(not yet|\bno\b|\bnope\b|didn'?t|haven'?t|\bnot done\b|\blater\b|forgot|\bstill\b|can'?t|couldn'?t|\bfailed\b|missed|didn'?t make)`)
+	posRe       = regexp.MustCompile(`(?i)(\bdone\b|\bdid it\b|\byes\b|\byeah\b|\byep\b|\bbought\b|\bsent\b|\bfinished\b|\bcomplete|\bhandled\b|\balready (did|done|sent|bought)\b|✅)`)
+	negRe       = regexp.MustCompile(`(?i)(not yet|\bno\b|\bnope\b|didn'?t|haven'?t|\bnot done\b|\blater\b|forgot|\bstill\b|can'?t|couldn'?t|\bfailed\b|didn'?t make)`)
+	// Acknowledgments (whole-message): heard you, not done. Checked before pos/neg.
+	ackRe = regexp.MustCompile(`(?i)^\s*(ok(ay)?|kk|k|sure|will do|on it|got it|gotcha|alright|aight|fine|noted|👍|🫡)\s*[.!]*\s*$`)
 )
 
 func (heuristic) Classify(task string, now time.Time) Decision {
@@ -87,9 +93,13 @@ func (heuristic) Classify(task string, now time.Time) Decision {
 }
 
 func (heuristic) ClassifyReply(task, reply string) ReplyVerdict {
+	// A bare acknowledgment ("ok", "will do") is neither done nor a refusal.
+	if ackRe.MatchString(reply) {
+		return ReplyVerdict{Ack: true}
+	}
 	low := strings.ToLower(reply)
-	// Negative phrasing is checked first: "not done"/"didn't" contain no positive
-	// token, but "not yet done" would otherwise trip the positive "done" match.
+	// Negative phrasing is checked before positive: "not done"/"didn't" carry no
+	// positive token, but "not yet done" would otherwise trip the "done" match.
 	if negRe.MatchString(low) {
 		return ReplyVerdict{Positive: false}
 	}

@@ -137,12 +137,23 @@ func (d *Comp) feed(transport, addr, _ /*msgRef*/, text string) bool {
 		return true
 	}
 
-	if d.classify.ClassifyReply(r.TaskText, text).Positive {
+	verdict := d.classify.ClassifyReply(r.TaskText, text)
+	switch {
+	case verdict.Positive:
 		d.onConfirmed(r, now)
-	} else {
-		d.onNegative(r, text, now)
+	case verdict.Ack:
+		d.onAck(r) // heard, not done — keep the schedule, don't close or chase
+	default:
+		d.onNegative(r, verdict, now)
 	}
 	return true
+}
+
+// onAck records a bare acknowledgment ("ok", "will do") without advancing the
+// loop: the reminder keeps its current state + next tick and checks in as planned.
+func (d *Comp) onAck(r store.Reminder) {
+	d.store.AddReminderEvent(r.ID, "ack", r.LastReply)
+	d.save(r) // persist last_reply; state/next_at unchanged
 }
 
 func (d *Comp) onConfirmed(r store.Reminder, now time.Time) {
@@ -158,8 +169,7 @@ func (d *Comp) onConfirmed(r store.Reminder, now time.Time) {
 	d.reportToRequester(r, fmt.Sprintf("✅ %s confirmed: \"%s\" is done.", d.who(r), r.TaskText))
 }
 
-func (d *Comp) onNegative(r store.Reminder, text string, now time.Time) {
-	verdict := d.classify.ClassifyReply(r.TaskText, text)
+func (d *Comp) onNegative(r store.Reminder, verdict ReplyVerdict, now time.Time) {
 	if r.DeadlineBound && d.eventPassed(r, now) {
 		d.markMissed(r, now)
 		return
