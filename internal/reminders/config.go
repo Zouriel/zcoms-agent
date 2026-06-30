@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
 )
 
@@ -100,3 +101,16 @@ func SettingKey(field string) string {
 }
 
 func (d *Comp) cfg() Config { return LoadConfig(d.store) }
+
+// LiveBackend resolves the reminders task's agent backend from the persona rows
+// live (mirrors agentd.buildAgents + AgentConfig.For), so changing the Reminders
+// persona's backend in the console takes effect with no restart.
+func LiveBackend(st *store.Store) runner.Backend {
+	cfg := runner.AgentConfig{Tasks: map[string]runner.Backend{}}
+	if ps, err := st.ListPersonas(); err == nil {
+		for _, p := range ps {
+			cfg.Tasks[p.Key] = runner.Backend(p.Backend)
+		}
+	}
+	return cfg.For("reminders", "")
+}

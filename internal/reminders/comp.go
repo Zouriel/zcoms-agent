@@ -34,7 +34,6 @@ type commsClient interface {
 type Comp struct {
 	client   commsClient
 	store    *store.Store
-	agents   runner.AgentConfig
 	classify Classifier
 	composer Composer                // writes the humane message lines (may be nil → templates)
 	seed     func(key string) string // owner-editable persona scaffold (agent.db)
@@ -47,12 +46,12 @@ type Comp struct {
 
 // New builds the reminders runtime. mainUser/ownerChat are refreshed by the agent
 // once the daemon resolves them. classify may be nil — a heuristic is used then.
-func New(c *client.Client, st *store.Store, agents runner.AgentConfig, mainUser string, ownerChat int64, seed func(key string) string, classify Classifier, composer Composer) *Comp {
+func New(c *client.Client, st *store.Store, mainUser string, ownerChat int64, seed func(key string) string, classify Classifier, composer Composer) *Comp {
 	if classify == nil {
 		classify = heuristic{}
 	}
 	return &Comp{
-		client: c, store: st, agents: agents, classify: classify, composer: composer, seed: seed,
+		client: c, store: st, classify: classify, composer: composer, seed: seed,
 		log:       log.New(log.Writer(), "[reminders] ", log.LstdFlags),
 		mainUser:  mainUser,
 		ownerChat: ownerChat,

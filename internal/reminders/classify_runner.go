@@ -17,23 +17,24 @@ import (
 // heuristic for any field the model omits or when no backend is installed. The
 // heuristic stays the floor, so a missing/slow CLI never breaks reminder creation.
 type runnerClassifier struct {
-	agents runner.AgentConfig
-	seed   func(key string) string
-	dir    string
-	log    *log.Logger
-	base   heuristic
+	backend func() runner.Backend
+	seed    func(key string) string
+	dir     string
+	log     *log.Logger
+	base    heuristic
 }
 
-// NewRunnerClassifier builds the model-backed classifier. seed reads the editable
-// "reminders" persona scaffold from agent.db.
-func NewRunnerClassifier(agents runner.AgentConfig, seed func(key string) string) Classifier {
+// NewRunnerClassifier builds the model-backed classifier. backend resolves the
+// agent backend live (so a console change takes effect with no restart); seed
+// reads the editable "reminders" persona scaffold from agent.db.
+func NewRunnerClassifier(backend func() runner.Backend, seed func(key string) string) Classifier {
 	dir := ""
 	if d, err := runner.DefaultAppDir(); err == nil {
 		dir = filepath.Join(d, "reminders-staging")
 		_ = os.MkdirAll(dir, 0o700)
 	}
 	return &runnerClassifier{
-		agents: agents, seed: seed, dir: dir,
+		backend: backend, seed: seed, dir: dir,
 		log: log.New(log.Writer(), "[reminders/classify] ", log.LstdFlags),
 	}
 }
@@ -49,7 +50,7 @@ func (c *runnerClassifier) seedText() string {
 // floor and overriding with any field the model returns.
 func (c *runnerClassifier) Classify(task string, now time.Time) Decision {
 	base := c.base.Classify(task, now)
-	backend := c.agents.For("reminders", "")
+	backend := c.backend()
 	if backend == "" || c.dir == "" {
 		return base
 	}
@@ -65,7 +66,7 @@ func (c *runnerClassifier) Classify(task string, now time.Time) Decision {
 // ClassifyReply asks the model whether a confirm reply means the task is done.
 func (c *runnerClassifier) ClassifyReply(task, reply string) ReplyVerdict {
 	base := c.base.ClassifyReply(task, reply)
-	backend := c.agents.For("reminders", "")
+	backend := c.backend()
 	if backend == "" || c.dir == "" {
 		return base
 	}

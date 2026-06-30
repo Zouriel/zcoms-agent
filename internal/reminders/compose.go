@@ -47,25 +47,26 @@ type Composer interface {
 // runnerComposer asks the agent backend to write the line in a warm, motivating
 // voice; on any failure the caller falls back to a template.
 type runnerComposer struct {
-	agents runner.AgentConfig
-	seed   func(key string) string
-	dir    string
-	log    *log.Logger
+	backend func() runner.Backend
+	seed    func(key string) string
+	dir     string
+	log     *log.Logger
 }
 
-// NewRunnerComposer builds the model-backed message voice.
-func NewRunnerComposer(agents runner.AgentConfig, seed func(key string) string) Composer {
+// NewRunnerComposer builds the model-backed message voice. backend resolves the
+// agent backend live (console change → no restart).
+func NewRunnerComposer(backend func() runner.Backend, seed func(key string) string) Composer {
 	dir := ""
 	if d, err := runner.DefaultAppDir(); err == nil {
 		dir = filepath.Join(d, "reminders-staging")
 		_ = os.MkdirAll(dir, 0o700)
 	}
-	return &runnerComposer{agents: agents, seed: seed, dir: dir,
+	return &runnerComposer{backend: backend, seed: seed, dir: dir,
 		log: log.New(log.Writer(), "[reminders/voice] ", log.LstdFlags)}
 }
 
 func (c *runnerComposer) Compose(kind MsgKind, ctx ComposeCtx) string {
-	backend := c.agents.For("reminders", "")
+	backend := c.backend()
 	if backend == "" || c.dir == "" {
 		return ""
 	}

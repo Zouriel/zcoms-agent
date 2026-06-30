@@ -101,6 +101,11 @@ var defaultSeed = map[string]struct{ display, seed string }{
 // the full scaffold while an edited row is left untouched.
 const legacyBridgeSeed = "You are the owner's personal assistant, running on their own machine via the `zc` bridge with full shell access. Their Telegram AND WhatsApp are ALREADY logged in through this tool — never tell them to log in or scan a QR. Reach messages with the `zc` CLI."
 
+// legacyReminderSeed is the first-cut reminders seed (classification only, shipped
+// before the warm message-voice was folded in). UpgradeDefaults rewrites a row
+// still holding it to the current default + name.
+const legacyReminderSeed = "You classify the owner's reminder tasks and the replies they get back. For a task, decide the cadence (one-off vs recurring), whether it is bound to a closing deadline (a meeting/call/flight whose window passes) or is an open task to chase until done, infer an event time if one is implied, and pick sensible pre-reminder and follow-up gaps. For a reply, decide whether the task is now done. Be decisive and output only the requested fields."
+
 // UpgradeDefaults migrates rows that still hold a superseded default to the
 // current one. Idempotent and edit-preserving: it only touches a row whose seed
 // exactly equals the old default.
@@ -110,6 +115,18 @@ func UpgradeDefaults(s *store.Store) error {
 	} else if ok && strings.TrimSpace(p.SeedPrompt) == legacyBridgeSeed {
 		p.SeedPrompt = defaultBridgeSeed
 		if err := s.UpdatePersona(store.Owner, Bridge, p); err != nil {
+			return err
+		}
+	}
+	// Reminders: the first cut seeded a classification-only prompt named "Reminder
+	// classifier"; rewrite an un-customized row to the warm assistant default so
+	// the console shows the prompt that actually writes the messages.
+	if p, ok, err := s.GetPersona(Reminders); err != nil {
+		return err
+	} else if ok && strings.TrimSpace(p.SeedPrompt) == legacyReminderSeed {
+		p.SeedPrompt = defaultSeed[Reminders].seed
+		p.DisplayName = defaultSeed[Reminders].display
+		if err := s.UpdatePersona(store.Owner, Reminders, p); err != nil {
 			return err
 		}
 	}
