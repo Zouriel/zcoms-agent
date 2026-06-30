@@ -23,6 +23,8 @@ func (a *Agent) dispatch(text string) (string, error) {
 	switch verb {
 	case "errand", "errands":
 		return a.Errands.HandleCommand(text), nil
+	case "remind", "reminder", "reminders":
+		return a.Reminders.HandleCommand(a.ownerRequester(), text), nil
 	case "agent":
 		if len(rest) == 0 {
 			return "", fmt.Errorf("usage: agent workspace|session|persona|allowlist <…>")
@@ -64,6 +66,8 @@ func (a *Agent) jsonQuery(args []string) (string, error) {
 		v, err = a.Store.ListAllow()
 	case "triage-groups":
 		v, err = a.Store.ListTriageGroups()
+	case "reminders":
+		v, err = a.Store.ListReminders()
 	case "settings":
 		v, err = a.Store.ListSettings()
 	case "sessions":

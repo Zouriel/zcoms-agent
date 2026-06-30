@@ -134,6 +134,32 @@ CREATE TABLE IF NOT EXISTS triage_group_sources (
   transport TEXT NOT NULL,          -- 'telegram'|'whatsapp'|'instagram'
   account TEXT,                     -- which connected account (if >1)
   chat_filter TEXT                  -- optional include/exclude
+);
+CREATE TABLE IF NOT EXISTS reminders (
+  id INTEGER PRIMARY KEY,
+  requester_addr    TEXT NOT NULL,                  -- who asked: "transport|handle"
+  requester_name    TEXT,                           -- display label for the requester
+  target_contact_id INTEGER NOT NULL DEFAULT 0,     -- contacts ref (0 if self/none)
+  target_transport  TEXT NOT NULL,                  -- 'telegram'|'whatsapp'
+  target_addr       TEXT NOT NULL,                  -- who gets reminded (native reply addr)
+  target_name       TEXT,                           -- display label for the reminded party
+  task_text         TEXT NOT NULL,
+  kind              TEXT NOT NULL DEFAULT 'oneoff',  -- 'oneoff' | 'recurring'
+  recur_spec        TEXT,                           -- daily 'HH:MM' / 'weekdays HH:MM' (recurring)
+  deadline_bound    INTEGER NOT NULL DEFAULT 0,
+  event_at          TEXT,                           -- inferred/explicit event time (RFC3339), if any
+  pre_delay_secs    INTEGER NOT NULL DEFAULT 0,      -- lead before the pre-reminder
+  post_gap_secs     INTEGER NOT NULL DEFAULT 0,      -- gap to the "did you do it?" / re-ask spacing
+  state             TEXT NOT NULL,                  -- scheduled|pre_reminded|awaiting_confirm|snoozed|done|missed|cancelled
+  next_at           TEXT,                           -- next scheduler tick (RFC3339)
+  attempts          INTEGER NOT NULL DEFAULT 0,
+  last_reply        TEXT,
+  created_at TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS reminder_events (
+  id INTEGER PRIMARY KEY,
+  reminder_id INTEGER NOT NULL REFERENCES reminders(id) ON DELETE CASCADE,
+  at TEXT, kind TEXT, detail TEXT   -- 'create'|'pre_remind'|'ask_confirm'|'reply'|'snooze'|'done'|'missed'|'cancel'
 );`)
 	return err
 }

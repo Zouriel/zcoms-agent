@@ -19,6 +19,7 @@ import (
 	"github.com/Zouriel/zcoms-agent/internal/bridge"
 	"github.com/Zouriel/zcoms-agent/internal/errands"
 	"github.com/Zouriel/zcoms-agent/internal/personas"
+	"github.com/Zouriel/zcoms-agent/internal/reminders"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/sessions"
 	"github.com/Zouriel/zcoms-agent/internal/store"
@@ -35,8 +36,9 @@ type Agent struct {
 	Sessions *sessions.Manager
 	Sched    *scheduler.Scheduler
 	Client   *client.Client
-	Bridge   *bridge.Comp
-	Errands  *errands.Comp
+	Bridge    *bridge.Comp
+	Errands   *errands.Comp
+	Reminders *reminders.Comp
 
 	settings runner.Settings
 	log      *log.Logger
@@ -126,10 +128,15 @@ func (a *Agent) buildRuntimes() error {
 	// console edits take effect without a restart.
 	seedFn := func(key string) string { return personas.SeedOr(a.Store, key) }
 
+	// Reminders is built before the bridge so the bridge can drive it in-process
+	// for `remind …` commands.
+	a.Reminders = reminders.New(a.Client, a.Store, agents, settings.MainUser, mainChat, seedFn,
+		reminders.NewRunnerClassifier(agents, seedFn), reminders.NewRunnerComposer(agents, seedFn))
+
 	a.Bridge = bridge.New(bridge.Deps{
 		Client: a.Client, WAEnabled: settings.WhatsApp.Enabled,
 		Locations: locs, Allow: allow, Agents: agents, Settings: settings, MainChatID: mainChat,
-		PersonaSeed: seedFn,
+		PersonaSeed: seedFn, Reminders: a.Reminders,
 	})
 	a.Errands = errands.New(a.Client, settings.WhatsApp.Enabled, agents, mainChat, seedFn)
 
@@ -153,7 +160,18 @@ func (a *Agent) registerJobs() {
 	// inbound arrives over the daemon subscribe stream, so there are no sidecar
 	// polls — the Node Baileys sidecar is retired.
 	a.Sched.Interval("scheduled-errands", 30*time.Second, a.Errands.FireDueScheduled)
+	// Reminders are advanced from one coarse tick that scans the reminders table
+	// for due rows (like triage) — so a reminder that came due during downtime
+	// fires on the first tick after a restart, with no in-memory state to rebuild.
+	a.Sched.Interval("reminders-tick", 30*time.Second, a.Reminders.FireDue)
 	a.Sched.Interval("workspace-discovery", 10*time.Minute, func() { _, _ = a.Registry.Sync() })
+}
+
+// ownerRequester builds the reminder requester for the agent.sock/CLI path: the
+// caller of a 0600 socket is always the owner, so "remind me …" addresses the
+// owner's own chat (resolved by the reminders runtime when the address is blank).
+func (a *Agent) ownerRequester() reminders.Requester {
+	return reminders.Requester{Transport: "telegram", Handle: a.settings.MainUser, Name: "you", Owner: true}
 }
 
 // reloadAllow rebuilds the allowlist from agent.db and pushes it into the live
@@ -323,15 +341,23 @@ func (a *Agent) subscribe(ctx context.Context) {
 			switch transportOf(ev) {
 			case "whatsapp":
 				// Daemon-delivered WhatsApp (whatsmeow): an errand-owned chat goes
-				// to errands, everything else to the bridge.
+				// to errands, a reminder-owned chat to reminders, else the bridge.
 				if a.Errands.OwnsWA(ev.Address) {
 					a.Errands.FeedWhatsApp(ev.Address, ev.MsgRef, ev.Text, ev.File)
+					return
+				}
+				if a.Reminders.OwnsWA(ev.Address) {
+					a.Reminders.FeedWhatsApp(ev.Address, ev.MsgRef, ev.Text)
 					return
 				}
 				a.Bridge.HandleEvent(ev)
 			default: // telegram (Instagram joins the bridge path later)
 				if a.Errands.Owns(ev.ChatID) {
 					a.Errands.FeedTelegram(ev.ChatID, ev.MessageID, ev.Text, ev.File)
+					return
+				}
+				if a.Reminders.Owns(ev.ChatID) {
+					a.Reminders.FeedTelegram(ev.ChatID, ev.Text)
 					return
 				}
 				a.Bridge.HandleEvent(ev)
