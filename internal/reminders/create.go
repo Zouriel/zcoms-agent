@@ -55,7 +55,7 @@ func (d *Comp) createReply(req Requester, text string) string {
 	}
 
 	now := time.Now()
-	dec := d.classify.Classify(task, now)
+	dec := proportionate(d.classify.Classify(task, now))
 	state, nextAt := firstFire(dec, now)
 
 	r := store.Reminder{
@@ -216,6 +216,24 @@ func (d *Comp) cancelReply(req Requester, args []string) string {
 }
 
 // --- timing helpers ----------------------------------------------------------
+
+// proportionate keeps the follow-up gap sensible relative to how soon the task
+// is due: a near-term task ("eat in 2 minutes") shouldn't wait the default 15 min
+// to be checked on. Deadline events are event-anchored, so they're left alone.
+func proportionate(d Decision) Decision {
+	if d.DeadlineBound || d.Kind == "recurring" {
+		return d
+	}
+	if d.PreDelay > 0 && d.PreDelay < 15*time.Minute {
+		if cap := d.PreDelay + 3*time.Minute; d.PostGap > cap {
+			d.PostGap = cap
+		}
+	}
+	if d.PostGap < 2*time.Minute {
+		d.PostGap = 2 * time.Minute
+	}
+	return d
+}
 
 // firstFire computes the initial state + next tick from a creation Decision.
 func firstFire(d Decision, now time.Time) (state string, at time.Time) {

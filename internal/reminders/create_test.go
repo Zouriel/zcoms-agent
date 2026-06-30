@@ -48,6 +48,29 @@ func TestTrustGate(t *testing.T) {
 	}
 }
 
+func TestProportionate(t *testing.T) {
+	// Near-term task: a 15-min follow-up is clamped to pre+3m.
+	d := proportionate(Decision{Kind: "oneoff", PreDelay: 2 * time.Minute, PostGap: 15 * time.Minute})
+	if d.PostGap != 5*time.Minute {
+		t.Fatalf("near-term post = %v, want 5m", d.PostGap)
+	}
+	// Open-ended task (1h pre): the long follow-up is left alone.
+	d = proportionate(Decision{Kind: "oneoff", PreDelay: time.Hour, PostGap: 15 * time.Minute})
+	if d.PostGap != 15*time.Minute {
+		t.Fatalf("open-ended post = %v, want 15m", d.PostGap)
+	}
+	// Deadline events are event-anchored — untouched.
+	d = proportionate(Decision{Kind: "oneoff", DeadlineBound: true, PreDelay: 2 * time.Minute, PostGap: 20 * time.Minute})
+	if d.PostGap != 20*time.Minute {
+		t.Fatalf("deadline post = %v, want 20m", d.PostGap)
+	}
+	// A floor keeps the gap usable.
+	d = proportionate(Decision{Kind: "oneoff", PreDelay: 30 * time.Second, PostGap: 0})
+	if d.PostGap != 2*time.Minute {
+		t.Fatalf("floor post = %v, want 2m", d.PostGap)
+	}
+}
+
 // TestCreatePersistsAndSchedules checks a created reminder lands in 'scheduled'
 // with a future next_at and the inferred fields.
 func TestCreatePersistsAndSchedules(t *testing.T) {

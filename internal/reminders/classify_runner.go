@@ -96,7 +96,7 @@ func buildClassifyPrompt(task string, now time.Time) string {
 		"DEADLINE: yes | no   (yes ONLY if tied to an event whose window closes — a meeting/call/flight/appointment; no for an open task chased until done)",
 		"EVENT: YYYY-MM-DDTHH:MM if a specific time is implied, else none",
 		"PRE: integer minutes from now to the first nudge (for a deadline event: minutes BEFORE the event)",
-		"POST: integer minutes to wait before asking whether it was done",
+		"POST: integer minutes to wait before asking whether it was done — make this PROPORTIONATE to how soon the task is due: a task due in a few minutes should be followed up in a few minutes, NOT 15+; only an open-ended task with no time gets a longer gap",
 		"RECUR: none | daily HH:MM | weekdays HH:MM | weekly <Mon|Tue|Wed|Thu|Fri|Sat|Sun> HH:MM",
 	}, "\n")
 }
