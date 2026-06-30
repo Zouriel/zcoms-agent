@@ -31,7 +31,8 @@ type Comp struct {
 	settings         Settings
 	mainChatID       int64
 	personaSeed      func(key string) string
-	reminders        *reminders.Comp // in-process reminder loop (may be nil)
+	reminders        *reminders.Comp        // in-process reminder loop (may be nil)
+	phrase           func(key string) string // editable canned messages (may be nil)
 
 	mu       sync.Mutex
 	triageMu sync.Mutex
@@ -65,6 +66,17 @@ func (d *Comp) seed(key string) string {
 		return ""
 	}
 	return d.personaSeed(key)
+}
+
+// phraseOr returns an editable canned message: the owner's override (live from
+// agent.db via the wired accessor), else the compiled default.
+func (d *Comp) phraseOr(key string) string {
+	if d.phrase != nil {
+		if s := d.phrase(key); strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return DefaultPhrase(key)
 }
 
 func (d *Comp) send(r route, text string) { _ = d.sendErr(r, text) }

@@ -57,6 +57,15 @@ type Session struct {
 	Backend    string `json:"backend"`
 }
 
+// Phrase is an editable canned bridge message (console-editable, stored as a
+// "phrase.<key>" setting).
+type Phrase struct {
+	Key     string `json:"key"`
+	Label   string `json:"label"`
+	Value   string `json:"value"`
+	Default string `json:"default"`
+}
+
 // ReminderEvent is one row of a reminder's audit timeline (the log).
 type ReminderEvent struct {
 	ID         int64  `json:"id"`
@@ -128,6 +137,12 @@ func (c *Client) QueryTriageGroups() ([]TriageGroup, error) {
 func (c *Client) Reminders() ([]Reminder, error) {
 	var out []Reminder
 	return out, c.queryJSON("reminders", &out)
+}
+
+// Phrases returns the editable canned bridge messages.
+func (c *Client) Phrases() ([]Phrase, error) {
+	var out []Phrase
+	return out, c.queryJSON("phrases", &out)
 }
 
 // Remind runs a `remind …` command (create / list / cancel / settings) through the

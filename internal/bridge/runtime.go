@@ -25,6 +25,9 @@ type Deps struct {
 	// Reminders is the in-process reminder loop the `remind …` command drives. May
 	// be nil (then the command replies that reminders are unavailable).
 	Reminders *reminders.Comp
+	// Phrase returns an editable canned message by key (override from agent.db,
+	// else the default), read live. May be nil (then the compiled default is used).
+	Phrase func(key string) string
 }
 
 // New builds the interactive bridge runtime for the unified agent process.
@@ -43,6 +46,7 @@ func New(d Deps) *Comp {
 		mainChatID:       d.MainChatID,
 		personaSeed:      d.PersonaSeed,
 		reminders:        d.Reminders,
+		phrase:           d.Phrase,
 		byUser:           map[string]*userState{},
 	}
 }

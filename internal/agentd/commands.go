@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Zouriel/zcoms-agent/internal/bridge"
 	"github.com/Zouriel/zcoms-agent/internal/reminders"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
@@ -80,6 +81,8 @@ func (a *Agent) jsonQuery(args []string) (string, error) {
 		v, err = a.Store.ListReminderEvents(id)
 	case "reminder-settings":
 		v = reminders.LoadConfig(a.Store)
+	case "phrases":
+		v = bridge.Phrases(a.Store)
 	case "settings":
 		v, err = a.Store.ListSettings()
 	case "sessions":

@@ -140,6 +140,7 @@ func (a *Agent) buildRuntimes() error {
 		Client: a.Client, WAEnabled: settings.WhatsApp.Enabled,
 		Locations: locs, Allow: allow, Agents: agents, Settings: settings, MainChatID: mainChat,
 		PersonaSeed: seedFn, Reminders: a.Reminders,
+		Phrase: func(key string) string { return bridge.PhraseOr(a.Store, key) },
 	})
 	a.Errands = errands.New(a.Client, settings.WhatsApp.Enabled, agents, mainChat, seedFn)
 

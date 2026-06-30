@@ -19,7 +19,7 @@ func (d *Comp) handleIncomingFile(st *userState, localPath, fileName, caption st
 	loc, dir, rt := st.location, st.locationPath, st.route()
 	d.mu.Unlock()
 	if loc == "" {
-		d.send(rt, "Pick a location first (send 'locations'), then send the file — it needs a project to live in.")
+		d.send(rt, d.phraseOr("location_gate_file"))
 		return
 	}
 	if strings.TrimSpace(localPath) == "" {

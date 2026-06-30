@@ -113,7 +113,7 @@ func (d *Comp) handle(st *userState, text string) {
 			d.send(st.route(), d.statusLine(st))
 			return
 		}
-		d.send(st.route(), "⏳ Still working on your previous message — one moment.")
+		d.send(st.route(), d.phraseOr("busy"))
 		return
 	}
 
@@ -166,7 +166,7 @@ func (d *Comp) handle(st *userState, text string) {
 	awaiting := st.awaitingConfirm
 	d.mu.Unlock()
 	if loc == "" {
-		d.send(st.route(), "Pick a location first — send 'locations'.")
+		d.send(st.route(), d.phraseOr("location_gate"))
 		return
 	}
 
@@ -236,7 +236,7 @@ func (d *Comp) listSessions(st *userState) {
 	loc, path := st.location, st.locationPath
 	d.mu.Unlock()
 	if loc == "" {
-		d.send(st.route(), "Pick a location first — send 'locations'.")
+		d.send(st.route(), d.phraseOr("location_gate"))
 		return
 	}
 
@@ -343,7 +343,7 @@ func (d *Comp) startNew(st *userState) {
 	st.sessionID, st.pendingKind, st.awaitingConfirm = "", "", false
 	d.mu.Unlock()
 	if loc == "" {
-		d.send(st.route(), "Pick a location first — send 'locations'.")
+		d.send(st.route(), d.phraseOr("location_gate"))
 		return
 	}
 	d.send(st.route(), "🆕 New session in "+loc+". Send your first message.")
