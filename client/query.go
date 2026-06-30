@@ -57,6 +57,26 @@ type Session struct {
 	Backend    string `json:"backend"`
 }
 
+// ReminderEvent is one row of a reminder's audit timeline (the log).
+type ReminderEvent struct {
+	ID         int64  `json:"id"`
+	ReminderID int64  `json:"reminder_id"`
+	At         string `json:"at"`
+	Kind       string `json:"kind"`
+	Detail     string `json:"detail,omitempty"`
+}
+
+// ReminderConfig is the live, tunable reminder behaviour.
+type ReminderConfig struct {
+	Enabled           bool   `json:"enabled"`
+	Voice             string `json:"voice"`
+	FirstNudgeMins    int    `json:"first_nudge_mins"`
+	FollowupMins      int    `json:"followup_mins"`
+	DeadlineLeadMins  int    `json:"deadline_lead_mins"`
+	DeadlineAfterMins int    `json:"deadline_after_mins"`
+	MaxNudges         int    `json:"max_nudges"`
+}
+
 // Reminder mirrors the store row for the console/CLI (read-only view).
 type Reminder struct {
 	ID              int64  `json:"id"`
@@ -116,10 +136,22 @@ func (c *Client) Reminders() ([]Reminder, error) {
 	return out, c.queryJSON("reminders", &out)
 }
 
-// Remind runs a `remind …` command (create / list / cancel) through the agent and
-// returns its human reply. The console/CLI create + cancel reminders this way.
+// Remind runs a `remind …` command (create / list / cancel / settings) through the
+// agent and returns its human reply.
 func (c *Client) Remind(line string) (string, error) {
 	return c.Command("remind "+line, "")
+}
+
+// ReminderEvents returns one reminder's audit timeline.
+func (c *Client) ReminderEvents(id int64) ([]ReminderEvent, error) {
+	var out []ReminderEvent
+	return out, c.queryJSON("reminder-events "+itoa(id), &out)
+}
+
+// ReminderConfig returns the live reminder settings.
+func (c *Client) ReminderConfig() (ReminderConfig, error) {
+	var out ReminderConfig
+	return out, c.queryJSON("reminder-settings", &out)
 }
 
 // Sessions returns the live sessions (decorated) for a workspace id.

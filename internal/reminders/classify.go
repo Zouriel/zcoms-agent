@@ -17,6 +17,7 @@ type Decision struct {
 	PreDelay      time.Duration // lead before the pre-reminder (used when no EventAt)
 	PostGap       time.Duration // pre-reminder/event → confirm question; also re-ask spacing
 	RecurSpec     string        // "daily HH:MM" | "weekdays HH:MM" (recurring)
+	Explicit      bool          // the task itself specified a time (so owner-default gaps don't apply)
 }
 
 // ReplyVerdict is the read of a confirm reply (§4.3). A reply is one of three
@@ -52,6 +53,7 @@ type heuristic struct{}
 var (
 	clockRe     = regexp.MustCompile(`(?i)\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b|\b([01]?\d|2[0-3]):([0-5]\d)\b`)
 	recurRe     = regexp.MustCompile(`(?i)\b(every|each|daily|everyday|weekly|weekday|weekdays|each day|every day)\b`)
+	relDelayRe  = regexp.MustCompile(`(?i)\b(in \d+\s*(min|mins|minute|minutes|hour|hours|hr|hrs|day|days|week|weeks)|tomorrow|tonight|this (morning|afternoon|evening|week)|next (week|mon|tue|wed|thu|fri|sat|sun))`)
 	weekdayRe   = regexp.MustCompile(`(?i)\b(weekday|weekdays|every weekday)\b`)
 	eventWordRe = regexp.MustCompile(`(?i)\b(meeting|meet|sync|call|appointment|appt|flight|interview|deadline|due|class|session|standup|stand-up|doctor|dentist|webinar|demo|presentation|review|catch-?up)\b`)
 	posRe       = regexp.MustCompile(`(?i)(\bdone\b|\bdid it\b|\byes\b|\byeah\b|\byep\b|\bbought\b|\bsent\b|\bfinished\b|\bcomplete|\bhandled\b|\balready (did|done|sent|bought)\b|✅)`)
@@ -67,10 +69,15 @@ func (heuristic) Classify(task string, now time.Time) Decision {
 	at, ok := parseClock(task, now)
 	if ok {
 		d.EventAt = at
+		d.Explicit = true
+	}
+	if relDelayRe.MatchString(low) {
+		d.Explicit = true // "in 20 minutes", "in 2 hours"
 	}
 
 	if recurRe.MatchString(low) && ok {
 		d.Kind = "recurring"
+		d.Explicit = true
 		hm := at.Format("15:04")
 		if weekdayRe.MatchString(low) {
 			d.RecurSpec = "weekdays " + hm

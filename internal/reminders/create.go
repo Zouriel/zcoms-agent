@@ -38,6 +38,8 @@ func (d *Comp) HandleCommand(req Requester, text string) string {
 		return d.listReply(req)
 	case "cancel", "rm", "stop":
 		return d.cancelReply(req, fields[1:])
+	case "settings", "config", "set":
+		return d.settingsReply(req, fields[1:])
 	}
 	return d.createReply(req, text)
 }
@@ -54,8 +56,12 @@ func (d *Comp) createReply(req Requester, text string) string {
 		return "⚠️ " + err.Error()
 	}
 
+	cfg := d.cfg()
+	if !cfg.Enabled {
+		return "🔕 Reminders are turned off right now — switch them back on in the console settings."
+	}
 	now := time.Now()
-	dec := proportionate(d.classify.Classify(task, now))
+	dec := proportionate(applyConfig(d.classify.Classify(task, now), cfg))
 	state, nextAt := firstFire(dec, now)
 
 	r := store.Reminder{
@@ -163,6 +169,31 @@ func (d *Comp) contactAllowListed(c client.Contact) bool {
 	return false
 }
 
+// settingsReply shows or sets a reminder config knob (owner only). The change is
+// written to agent.db and read live by the engine — no restart.
+func (d *Comp) settingsReply(req Requester, args []string) string {
+	if !req.Owner {
+		return "⚠️ only the owner can change reminder settings"
+	}
+	c := d.cfg()
+	if len(args) == 0 {
+		return fmt.Sprintf("Reminders — enabled=%v · voice=%s · first_nudge=%dm · followup=%dm · deadline_lead=%dm · deadline_after=%dm · max_nudges=%d",
+			c.Enabled, c.Voice, c.FirstNudgeMins, c.FollowupMins, c.DeadlineLeadMins, c.DeadlineAfterMins, c.MaxNudges)
+	}
+	if len(args) < 2 {
+		return "Usage: remind settings <enabled|voice|first_nudge_mins|followup_mins|deadline_lead_mins|deadline_after_mins|max_nudges> <value>"
+	}
+	key := SettingKey(args[0])
+	if key == "" {
+		return "⚠️ unknown reminder setting " + args[0]
+	}
+	val := strings.TrimSpace(strings.Join(args[1:], " "))
+	if err := d.store.SetSetting(store.Owner, key, val); err != nil {
+		return "⚠️ " + err.Error()
+	}
+	return "✅ " + args[0] + " = " + val
+}
+
 // listReply lists the requester's in-flight reminders (the owner sees all).
 func (d *Comp) listReply(req Requester) string {
 	rs, err := d.store.ActiveReminders()
@@ -216,6 +247,27 @@ func (d *Comp) cancelReply(req Requester, args []string) string {
 }
 
 // --- timing helpers ----------------------------------------------------------
+
+// applyConfig folds the owner's tunable defaults into a fresh Decision: a deadline
+// event uses the configured lead/after, an open (non-explicit) task uses the
+// configured first-nudge + follow-up gaps, and an explicitly-timed task keeps its
+// own inferred lead but takes the configured follow-up gap. Recurring timing is
+// event-anchored and left alone.
+func applyConfig(d Decision, c Config) Decision {
+	switch {
+	case d.Kind == "recurring":
+		// leave
+	case d.DeadlineBound:
+		d.PreDelay = c.deadlineLead()
+		d.PostGap = c.deadlineAfter()
+	case !d.Explicit:
+		d.PreDelay = c.firstNudge()
+		d.PostGap = c.followup()
+	default:
+		d.PostGap = c.followup()
+	}
+	return d
+}
 
 // proportionate keeps the follow-up gap sensible relative to how soon the task
 // is due: a near-term task ("eat in 2 minutes") shouldn't wait the default 15 min

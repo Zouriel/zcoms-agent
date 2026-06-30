@@ -209,5 +209,33 @@ func (s *Store) AddReminderEvent(reminderID int64, kind, detail string) {
 		reminderID, now(), kind, nullable(detail))
 }
 
+// ReminderEvent is one audit row in a reminder's timeline (the "log").
+type ReminderEvent struct {
+	ID         int64  `json:"id"`
+	ReminderID int64  `json:"reminder_id"`
+	At         string `json:"at"`
+	Kind       string `json:"kind"`
+	Detail     string `json:"detail,omitempty"`
+}
+
+// ListReminderEvents returns one reminder's audit trail, oldest first.
+func (s *Store) ListReminderEvents(reminderID int64) ([]ReminderEvent, error) {
+	rows, err := s.db.Query(`SELECT id, reminder_id, COALESCE(at,''), COALESCE(kind,''), COALESCE(detail,'')
+		FROM reminder_events WHERE reminder_id=? ORDER BY id`, reminderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ReminderEvent
+	for rows.Next() {
+		var e ReminderEvent
+		if err := rows.Scan(&e.ID, &e.ReminderID, &e.At, &e.Kind, &e.Detail); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // IsTerminalReminder reports whether a state ends the loop.
 func IsTerminalReminder(state string) bool { return !activeStates[state] }

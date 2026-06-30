@@ -91,8 +91,9 @@ func buildClassifyPrompt(task string, now time.Time) string {
 		"Classify this reminder task:",
 		quote(task),
 		"",
-		"Reply with EXACTLY these six lines and nothing else:",
+		"Reply with EXACTLY these seven lines and nothing else:",
 		"KIND: oneoff | recurring",
+		"EXPLICIT: yes | no   (yes if the task itself says WHEN — a time, 'in N minutes', 'tomorrow', a recurrence; no if you had to guess the timing)",
 		"DEADLINE: yes | no   (yes ONLY if tied to an event whose window closes — a meeting/call/flight/appointment; no for an open task chased until done)",
 		"EVENT: YYYY-MM-DDTHH:MM if a specific time is implied, else none",
 		"PRE: integer minutes from now to the first nudge (for a deadline event: minutes BEFORE the event)",
@@ -141,6 +142,9 @@ func parseDecision(text string, now time.Time, base Decision) Decision {
 	}
 	if v, ok := f["deadline"]; ok {
 		d.DeadlineBound = isYes(v)
+	}
+	if v, ok := f["explicit"]; ok {
+		d.Explicit = isYes(v)
 	}
 	if v, ok := f["event"]; ok && !strings.EqualFold(v, "none") {
 		if t, err := time.ParseInLocation("2006-01-02T15:04", strings.TrimSpace(v), now.Location()); err == nil {

@@ -8,11 +8,6 @@ import (
 	"github.com/Zouriel/zcoms-agent/internal/store"
 )
 
-// maxConfirmAttempts bounds the chase: after this many re-asks with no positive
-// confirmation, an until-done reminder stops nudging (so a forgotten task can't
-// pester forever).
-const maxConfirmAttempts = 12
-
 // FireDue is the scheduler-tick entry (registered as a 30s Interval). It advances
 // every reminder whose next_at has arrived. The DB is the source of truth, so a
 // reminder that came due while the agent was down fires on the first tick after
@@ -20,6 +15,9 @@ const maxConfirmAttempts = 12
 func (d *Comp) FireDue() { d.fireDue(time.Now()) }
 
 func (d *Comp) fireDue(now time.Time) {
+	if !d.cfg().Enabled {
+		return // paused: don't advance reminders (they resume when re-enabled)
+	}
 	due, err := d.store.DueReminders(rfc(now))
 	if err != nil {
 		d.log.Printf("due scan: %v", err)
@@ -75,7 +73,7 @@ func (d *Comp) confirmTimeout(r store.Reminder, now time.Time) {
 		d.markMissed(r, now)
 		return
 	}
-	if r.Attempts >= maxConfirmAttempts {
+	if r.Attempts >= d.cfg().MaxNudges {
 		d.giveUp(r)
 		return
 	}
@@ -174,7 +172,7 @@ func (d *Comp) onNegative(r store.Reminder, verdict ReplyVerdict, now time.Time)
 		d.markMissed(r, now)
 		return
 	}
-	if r.Attempts >= maxConfirmAttempts {
+	if r.Attempts >= d.cfg().MaxNudges {
 		d.giveUp(r)
 		return
 	}
@@ -265,7 +263,7 @@ func (d *Comp) reaskGap(r store.Reminder) time.Duration {
 	if r.PostGapSecs > 0 {
 		return time.Duration(r.PostGapSecs) * time.Second
 	}
-	return defaultPostGap
+	return d.cfg().followup()
 }
 
 func (d *Comp) eventPassed(r store.Reminder, now time.Time) bool {
@@ -293,7 +291,8 @@ func (d *Comp) msg(kind MsgKind, r store.Reminder, attempt int, _ time.Duration)
 
 func (d *Comp) msgGap(kind MsgKind, r store.Reminder, gap string) string {
 	ctx := d.ctxFor(r, gap)
-	if d.composer != nil {
+	// The "simple" voice setting (or no composer) uses the deterministic templates.
+	if d.composer != nil && d.cfg().agentVoice() {
 		if s := d.composer.Compose(kind, ctx); strings.TrimSpace(s) != "" {
 			return s
 		}
