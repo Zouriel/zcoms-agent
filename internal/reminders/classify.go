@@ -60,6 +60,10 @@ var (
 	negRe       = regexp.MustCompile(`(?i)(not yet|\bno\b|\bnope\b|didn'?t|haven'?t|\bnot done\b|\blater\b|forgot|\bstill\b|can'?t|couldn'?t|\bfailed\b|didn'?t make)`)
 	// Acknowledgments (whole-message): heard you, not done. Checked before pos/neg.
 	ackRe = regexp.MustCompile(`(?i)^\s*(ok(ay)?|kk|k|sure|will do|on it|got it|gotcha|alright|aight|fine|noted|👍|🫡)\s*[.!]*\s*$`)
+	// Attending/ongoing: they're AT or IN the thing — for a get-ready/attend task
+	// that means they MADE IT (done), even if it's still going. Checked before neg
+	// so "not done yet, I finish at 8" isn't read as a failure.
+	ongoingRe = regexp.MustCompile(`(?i)(\bin class\b|\bin (the|a) meeting\b|\bi'?m (in|at|here|inside)\b|\bon my way\b|\bfinish(es|ed)? at\b|\bend(s|ed)? at\b|\btill \d|\buntil \d)`)
 )
 
 func (heuristic) Classify(task string, now time.Time) Decision {
@@ -103,6 +107,11 @@ func (heuristic) ClassifyReply(task, reply string) ReplyVerdict {
 	// A bare acknowledgment ("ok", "will do") is neither done nor a refusal.
 	if ackRe.MatchString(reply) {
 		return ReplyVerdict{Ack: true}
+	}
+	// They're at/in the event (even if it's ongoing) → they made it → done. Checked
+	// before the negative match so "not done yet, I finish at 8" isn't a failure.
+	if ongoingRe.MatchString(reply) {
+		return ReplyVerdict{Positive: true}
 	}
 	low := strings.ToLower(reply)
 	// Negative phrasing is checked before positive: "not done"/"didn't" carry no

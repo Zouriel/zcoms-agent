@@ -99,8 +99,8 @@ func composePrompt(kind MsgKind, ctx ComposeCtx) string {
 	}
 	lines = append(lines, "", "Write ONE short message ("+intent(kind, ctx)+").")
 	lines = append(lines,
-		"Voice: warm, natural, human — like a thoughtful friend, not a bot. 1–2 sentences.",
-		"Do NOT add instructions like 'reply done/not yet', do NOT wrap it in quotes, do NOT add a sign-off.",
+		"Voice: warm, natural, human, like a thoughtful friend texting. One or two short sentences.",
+		"Write the way people actually text. Do NOT use em-dashes or en-dashes (the — or – characters) anywhere; use commas, full stops, or just two sentences instead. Do NOT add instructions like 'reply done/not yet', do NOT wrap it in quotes, do NOT add a sign-off.",
 		"Output only the message text.")
 	return strings.Join(lines, "\n")
 }
@@ -114,7 +114,7 @@ func intent(kind MsgKind, ctx ComposeCtx) string {
 		return "a friendly first nudge to do it"
 	case MsgConfirm:
 		if ctx.DeadlineBound {
-			return "a warm check-in asking how it went"
+			return "a warm check-in asking whether they made it / got there (and how it's going) — phrase it so 'yes, I'm there' or 'I made it' is a natural answer; don't assume it's already over"
 		}
 		return "a warm check-in asking whether they've done it yet"
 	case MsgNudge:
@@ -125,7 +125,7 @@ func intent(kind MsgKind, ctx ComposeCtx) string {
 	case MsgSnoozeAck:
 		return "they said not yet — reassure them warmly that you'll check back in " + ctx.Gap + ", no pressure"
 	case MsgMissed:
-		return "the time has passed — kindly acknowledge it without blame and offer to help find a new time"
+		return "the time seems to have passed and they didn't get to it — gently check in without blame, and offer help only if it makes sense; do NOT assume a fixed event (like a class or someone else's meeting) can be rescheduled"
 	case MsgDone:
 		return "they just got it done — a short, genuine bit of congratulations or thanks"
 	default:
@@ -167,27 +167,27 @@ func templateLine(kind MsgKind, ctx ComposeCtx) string {
 		if ctx.DeadlineBound {
 			when := ""
 			if ctx.EventLocal != "" {
-				when = " (" + ctx.EventLocal + ")"
+				when = " at " + ctx.EventLocal
 			}
-			return hi + " — heads up, " + task + " is coming up" + when + "."
+			return hi + ", heads up: " + task + " is coming up" + when + "."
 		}
-		return hi + " — just a nudge to " + task + " when you get a chance."
+		return hi + ", just a nudge to " + task + " when you get a chance."
 	case MsgConfirm:
 		if ctx.DeadlineBound {
-			return "Hey, how did " + task + " go?"
+			return "Hey, did you make it? How's " + task + " going?"
 		}
-		return "Hey — did you get to " + task + "?"
+		return "Hey, did you get to " + task + "?"
 	case MsgNudge:
 		if ctx.Attempt >= 3 {
-			return "Still on " + task + " — no rush, but let's get it off your plate. You've got this 💪"
+			return "Still on " + task + "? No rush, but let's get it off your plate. You've got this 💪"
 		}
-		return "Quick one — still hoping to " + task + "? Happy to help if anything's in the way."
+		return "Quick one, still hoping to " + task + "? Happy to help if anything's in the way."
 	case MsgSnoozeAck:
-		return "No worries — I'll check back in " + ctx.Gap + "."
+		return "No worries, I'll check back in " + ctx.Gap + "."
 	case MsgMissed:
-		return "Looks like " + task + " slipped by — want me to help reschedule it?"
+		return "Hey, did " + task + " work out in the end? If it slipped by, no worries; want a hand sorting it?"
 	case MsgDone:
-		return "Love it — " + task + ", done. Nice work 🙌"
+		return "Love it, that's " + task + " done. Nice work 🙌"
 	default:
 		return ""
 	}

@@ -58,7 +58,7 @@ func (d *Comp) createReply(req Requester, text string) string {
 
 	cfg := d.cfg()
 	if !cfg.Enabled {
-		return "🔕 Reminders are turned off right now — switch them back on in the console settings."
+		return "🔕 Reminders are turned off right now. Switch them back on in the console settings."
 	}
 	now := time.Now()
 	dec := proportionate(applyConfig(d.classify.Classify(task, now), cfg))
@@ -92,7 +92,7 @@ func (d *Comp) createReply(req Requester, text string) string {
 	if !tgt.isSelf {
 		who2 = tgt.name
 	}
-	return fmt.Sprintf("✅ Reminder #%d set — I'll remind %s to %s. First nudge %s.",
+	return fmt.Sprintf("✅ Reminder #%d set. I'll remind %s to %s, first nudge %s.",
 		saved.ID, who2, task, humanWhen(nextAt, now))
 }
 
@@ -111,7 +111,7 @@ func (d *Comp) resolveTarget(req Requester, who string) (target, error) {
 			}
 		}
 		if addr == "" {
-			return target{}, fmt.Errorf("I don't know how to reach you to remind you — set your main_user/Telegram first")
+			return target{}, fmt.Errorf("I don't know how to reach you to remind you. Set your main_user/Telegram first")
 		}
 		name := req.Name
 		if name == "" {
@@ -125,13 +125,13 @@ func (d *Comp) resolveTarget(req Requester, who string) (target, error) {
 		return target{}, fmt.Errorf("couldn't reach the contacts directory: %v", err)
 	}
 	if len(matches) == 0 {
-		return target{}, fmt.Errorf("I don't have a contact named %q — add them with `zc contacts add`", who)
+		return target{}, fmt.Errorf("I don't have a contact named %q. Add them with `zc contacts add`", who)
 	}
 	c := matches[0]
 
 	// §6 trust: non-owner requesters may only target allow-listed people.
 	if !req.Owner && !d.contactAllowListed(c) {
-		return target{}, fmt.Errorf("you can only set reminders for allow-listed people — %s isn't on the allowlist", c.Name)
+		return target{}, fmt.Errorf("you can only set reminders for allow-listed people, and %s isn't on the allowlist", c.Name)
 	}
 
 	tp, addr, err := d.reachable(c)
@@ -177,7 +177,7 @@ func (d *Comp) settingsReply(req Requester, args []string) string {
 	}
 	c := d.cfg()
 	if len(args) == 0 {
-		return fmt.Sprintf("Reminders — enabled=%v · voice=%s · first_nudge=%dm · followup=%dm · deadline_lead=%dm · deadline_after=%dm · max_nudges=%d",
+		return fmt.Sprintf("Reminders: enabled=%v, voice=%s, first_nudge=%dm, followup=%dm, deadline_lead=%dm, deadline_after=%dm, max_nudges=%d",
 			c.Enabled, c.Voice, c.FirstNudgeMins, c.FollowupMins, c.DeadlineLeadMins, c.DeadlineAfterMins, c.MaxNudges)
 	}
 	if len(args) < 2 {
@@ -258,8 +258,15 @@ func applyConfig(d Decision, c Config) Decision {
 	case d.Kind == "recurring":
 		// leave
 	case d.DeadlineBound:
-		d.PreDelay = c.deadlineLead()
-		d.PostGap = c.deadlineAfter()
+		// Config lead is a FLOOR, not an override: a prep/travel task the model
+		// gave a longer lead ("get ready" → 45m) keeps it, but every deadline gets
+		// at least the configured lead so it never fires right at the event.
+		if c.deadlineLead() > d.PreDelay {
+			d.PreDelay = c.deadlineLead()
+		}
+		if d.PostGap <= 0 {
+			d.PostGap = c.deadlineAfter()
+		}
 	case !d.Explicit:
 		d.PreDelay = c.firstNudge()
 		d.PostGap = c.followup()

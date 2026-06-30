@@ -102,6 +102,19 @@ func TestHeuristicClassifyReply(t *testing.T) {
 	}
 }
 
+// Being at/in the event (even ongoing) means they MADE IT — not a failure.
+// (The "Shanna is in class, finishes at 8" case.)
+func TestHeuristicOngoingIsMadeIt(t *testing.T) {
+	h := heuristic{}
+	for _, r := range []string{
+		"I am not done yet. I finish at 20:00", "I'm in class", "still in the meeting", "on my way",
+	} {
+		if v := h.ClassifyReply("get ready for class", r); !v.Positive {
+			t.Errorf("ongoing/attending reply %q = %+v, want made-it (Positive)", r, v)
+		}
+	}
+}
+
 func TestRequesterKey(t *testing.T) {
 	r := Requester{Transport: "telegram", Handle: "@alice"}
 	if r.key() != "telegram|@alice" {

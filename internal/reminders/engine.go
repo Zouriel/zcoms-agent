@@ -194,11 +194,11 @@ func (d *Comp) markMissed(r store.Reminder, now time.Time) {
 	r.State = store.ReminderMissed
 	r.NextAt = ""
 	d.save(r)
-	d.reportToRequester(r, fmt.Sprintf("⏰ %s didn't get to \"%s\" in time. Want to reschedule it?", d.who(r), r.TaskText))
+	d.reportToRequester(r, fmt.Sprintf("⏰ Heads up: %s hasn't gotten to \"%s\" yet. Want to follow up?", d.who(r), r.TaskText))
 }
 
 func (d *Comp) giveUp(r store.Reminder) {
-	d.sendTarget(r, fmt.Sprintf("I'll stop nudging about \"%s\" — tell me if you still need it.", r.TaskText))
+	d.sendTarget(r, fmt.Sprintf("I'll stop nudging about \"%s\". Tell me if you still need it.", r.TaskText))
 	r.State = store.ReminderCancelled
 	r.NextAt = ""
 	d.save(r)

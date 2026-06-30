@@ -97,8 +97,8 @@ func buildClassifyPrompt(task string, now time.Time) string {
 		"EXPLICIT: yes | no   (yes if the task itself says WHEN — a time, 'in N minutes', 'tomorrow', a recurrence; no if you had to guess the timing)",
 		"DEADLINE: yes | no   (yes ONLY if tied to an event whose window closes — a meeting/call/flight/appointment; no for an open task chased until done)",
 		"EVENT: YYYY-MM-DDTHH:MM if a specific time is implied, else none",
-		"PRE: integer minutes from now to the first nudge (for a deadline event: minutes BEFORE the event)",
-		"POST: integer minutes to wait before asking whether it was done — make this PROPORTIONATE to how soon the task is due: a task due in a few minutes should be followed up in a few minutes, NOT 15+; only an open-ended task with no time gets a longer gap",
+		"PRE: integer minutes from now to the first nudge. For a deadline event this is minutes BEFORE the event. If the task is PREPARATION/TRAVEL/ATTENDANCE — 'get ready for', 'leave for', 'head to', 'catch', 'go to', 'be at' something at a time — the EVENT is when it STARTS and PRE must be big enough to actually do it (getting ready ≈ 30–45 min, leaving for somewhere = the travel time): nudge WELL BEFORE the start, never right at it.",
+		"POST: integer minutes after the nudge to check in. For a prep/attend task keep this SMALL (a few minutes after the event start) — you're only checking they made it, not reviewing how it went. For a meeting/call you actually attend-and-review, POST can be longer (after it ends). Otherwise make POST proportionate to how soon the task is due (a task due in minutes → follow up in minutes, not 15+).",
 		"RECUR: none | daily HH:MM | weekdays HH:MM | weekly <Mon|Tue|Wed|Thu|Fri|Sat|Sun> HH:MM",
 	}, "\n")
 }
@@ -109,7 +109,7 @@ func buildReplyPrompt(task, reply string) string {
 		"The reminded person replied: " + quote(reply) + ".",
 		"",
 		"Reply with EXACTLY these three lines and nothing else:",
-		"DONE: yes | no   (yes ONLY if the task is actually finished — NOT for a mere 'ok'/'will do')",
+		"DONE: yes | no   (yes if the task is finished. CRUCIAL: for a 'get ready / make it to / attend / go to / leave for' task, they MADE IT if they're now AT or IN the thing — even if it's still going. 'I'm in class', 'not done yet, I finish at 8', 'still in the meeting' all mean DONE=yes, they got there. Say no ONLY if they clearly did NOT do/attend it — 'I couldn't make it', 'I forgot', 'I didn't go'. Do NOT treat 'not done yet' as failure when it just means the event is ongoing.)",
 		"ACK: yes | no    (yes if they only acknowledged or agreed — 'ok', 'okay', 'sure', 'will do', 'on it' — without saying it's finished)",
 		"NEXT: integer minutes until the next nudge if NOT done and worth chasing, else none",
 	}, "\n")

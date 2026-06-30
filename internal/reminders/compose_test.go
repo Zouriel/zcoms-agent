@@ -20,8 +20,14 @@ func TestTemplateLine(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(templateLine(MsgMissed, base), "reschedule") {
-		t.Error("missed line should offer to reschedule")
+	if !strings.Contains(templateLine(MsgMissed, base), "hand") {
+		t.Error("missed line should gently offer help")
+	}
+	// No em-dashes in any template line (they read as robotic/AI).
+	for _, kind := range []MsgKind{MsgPre, MsgConfirm, MsgNudge, MsgSnoozeAck, MsgMissed, MsgDone} {
+		if strings.ContainsAny(templateLine(kind, ComposeCtx{Task: "x", Gap: "5m", TargetName: "Sara"}), "—–") {
+			t.Errorf("%s template contains a dash", kind)
+		}
 	}
 
 	// Snooze ack uses the gap.

@@ -172,8 +172,8 @@ func TestDeadlineMissed(t *testing.T) {
 	if got.State != store.ReminderMissed {
 		t.Fatalf("expected missed, got %s", got.State)
 	}
-	if !strings.Contains(fc.lastText(), "reschedule") {
-		t.Fatalf("missed msg should offer reschedule: %q", fc.lastText())
+	if !strings.Contains(fc.lastText(), "hand") {
+		t.Fatalf("missed msg should gently offer help: %q", fc.lastText())
 	}
 }
 
