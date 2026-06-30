@@ -63,10 +63,14 @@ func TestNudgeReplyDone(t *testing.T) {
 
 	// Wait until the run is parked on the reply, then feed it.
 	waitForOwn(t, d, 200, true)
-	if !d.FeedTelegram(200, "I'm in the gym now") {
+	if !d.FeedTelegram(200, 4242, "I'm in the gym now") {
 		t.Fatal("reply not consumed")
 	}
 	<-done
+
+	if fc.marks == 0 {
+		t.Fatal("the consumed Telegram reply should be marked read")
+	}
 
 	got := reload(t, st, r.ID)
 	if got.State != store.ReminderDone {

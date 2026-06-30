@@ -241,9 +241,17 @@ func (d *Comp) Owns(chatID int64) bool { return d.ownsKey(recipientKey("telegram
 // OwnsWA reports whether a run is waiting on a WhatsApp jid's reply.
 func (d *Comp) OwnsWA(jid string) bool { return d.ownsKey(recipientKey("whatsapp", jid)) }
 
-// FeedTelegram routes a Telegram reply into the waiting run. Returns true if consumed.
-func (d *Comp) FeedTelegram(chatID int64, text string) bool {
-	return d.feed(recipientKey("telegram", itoa(chatID)), text)
+// FeedTelegram routes a Telegram reply into the waiting run, and marks it read so
+// triage doesn't also surface a message the reminder already handled. Returns true
+// if consumed.
+func (d *Comp) FeedTelegram(chatID, messageID int64, text string) bool {
+	if d.feed(recipientKey("telegram", itoa(chatID)), text) {
+		if messageID != 0 {
+			_ = d.client.MarkRead(chatID, []int64{messageID})
+		}
+		return true
+	}
+	return false
 }
 
 // FeedWhatsApp routes a WhatsApp reply into the waiting run and clears the unread.

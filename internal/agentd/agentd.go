@@ -361,7 +361,7 @@ func (a *Agent) subscribe(ctx context.Context) {
 					return
 				}
 				if a.Reminders.Owns(ev.ChatID) {
-					a.Reminders.FeedTelegram(ev.ChatID, ev.Text)
+					a.Reminders.FeedTelegram(ev.ChatID, ev.MessageID, ev.Text)
 					return
 				}
 				a.Bridge.HandleEvent(ev)
