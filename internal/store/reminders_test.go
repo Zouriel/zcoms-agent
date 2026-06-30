@@ -22,56 +22,46 @@ func TestReminderCRUD(t *testing.T) {
 	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 
 	r, err := s.CreateReminder(Reminder{
-		RequesterAddr:   "telegram|@me",
-		TargetTransport: "telegram", TargetAddr: "12345", TargetName: "you",
-		TaskText: "buy a rose", Kind: "oneoff",
-		State: ReminderScheduled, NextAt: past,
+		FromAddr: "telegram|@me", FromName: "you",
+		RecipientTransport: "telegram", RecipientAddr: "12345", RecipientName: "you",
+		Task: "buy a rose", State: ReminderActive, NextAt: past,
 	})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if r.ID == 0 {
-		t.Fatal("no id assigned")
+	if err != nil || r.ID == 0 {
+		t.Fatalf("create: %v id=%d", err, r.ID)
 	}
 
 	// Due scan picks up a past next_at.
-	due, err := s.DueReminders(time.Now().UTC().Format(time.RFC3339))
-	if err != nil || len(due) != 1 || due[0].ID != r.ID {
-		t.Fatalf("DueReminders = %v, %v", due, err)
+	if due, _ := s.DueReminders(time.Now().UTC().Format(time.RFC3339)); len(due) != 1 || due[0].ID != r.ID {
+		t.Fatalf("DueReminders = %v", due)
 	}
 
-	// A future next_at is not due.
+	// Agent updates carry-over + next time + run count.
+	r.CarryOver = "nudged once, awaiting reply"
 	r.NextAt = future
+	r.Runs = 1
 	if err := s.UpdateReminder(r); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	due, _ = s.DueReminders(time.Now().UTC().Format(time.RFC3339))
-	if len(due) != 0 {
+	got, _, _ := s.GetReminder(r.ID)
+	if got.CarryOver != "nudged once, awaiting reply" || got.Runs != 1 {
+		t.Fatalf("carry/runs not persisted: %+v", got)
+	}
+	if due, _ := s.DueReminders(time.Now().UTC().Format(time.RFC3339)); len(due) != 0 {
 		t.Fatalf("future reminder reported due: %v", due)
 	}
 
-	// Open-for-target correlation (the reply matcher's lookup).
-	r.State = ReminderAwaiting
-	if err := s.UpdateReminder(r); err != nil {
-		t.Fatalf("update awaiting: %v", err)
-	}
-	got, ok, err := s.OpenReminderForTarget("telegram", "12345")
-	if err != nil || !ok || got.ID != r.ID {
-		t.Fatalf("OpenReminderForTarget = %v,%v,%v", got.ID, ok, err)
-	}
-	if _, ok, _ := s.OpenReminderForTarget("telegram", "99999"); ok {
-		t.Fatal("matched a target with no reminder")
+	// Events timeline.
+	s.AddReminderEvent(r.ID, "run", "")
+	s.AddReminderEvent(r.ID, "send", "hey")
+	if evs, _ := s.ListReminderEvents(r.ID); len(evs) != 2 {
+		t.Fatalf("events = %v", evs)
 	}
 
-	// Cancel removes it from active + due + open scans.
+	// Cancel removes it from active + due.
 	if err := s.CancelReminder(r.ID); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
-	active, _ := s.ActiveReminders()
-	if len(active) != 0 {
-		t.Fatalf("cancelled reminder still active: %v", active)
-	}
-	if !IsTerminalReminder(ReminderCancelled) || IsTerminalReminder(ReminderScheduled) {
-		t.Fatal("IsTerminalReminder wrong")
+	if active, _ := s.ActiveReminders(); len(active) != 0 {
+		t.Fatalf("cancelled still active: %v", active)
 	}
 }

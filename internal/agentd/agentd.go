@@ -130,11 +130,11 @@ func (a *Agent) buildRuntimes() error {
 
 	// Reminders is built before the bridge so the bridge can drive it in-process
 	// for `remind …` commands.
-	// The reminders classifier/composer resolve their backend live from the
-	// Reminders persona (so a console backend change applies with no restart).
+	// The reminder agent resolves its backend live from the Reminders persona (so a
+	// console backend change applies with no restart) and runs one turn at a time.
 	remBackend := func() runner.Backend { return reminders.LiveBackend(a.Store) }
 	a.Reminders = reminders.New(a.Client, a.Store, settings.MainUser, mainChat, seedFn,
-		reminders.NewRunnerClassifier(remBackend, seedFn), reminders.NewRunnerComposer(remBackend, seedFn))
+		reminders.NewAgentTurn(remBackend))
 
 	a.Bridge = bridge.New(bridge.Deps{
 		Client: a.Client, WAEnabled: settings.WhatsApp.Enabled,

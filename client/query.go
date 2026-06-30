@@ -68,28 +68,22 @@ type ReminderEvent struct {
 
 // ReminderConfig is the live, tunable reminder behaviour.
 type ReminderConfig struct {
-	Enabled           bool   `json:"enabled"`
-	Voice             string `json:"voice"`
-	FirstNudgeMins    int    `json:"first_nudge_mins"`
-	FollowupMins      int    `json:"followup_mins"`
-	DeadlineLeadMins  int    `json:"deadline_lead_mins"`
-	DeadlineAfterMins int    `json:"deadline_after_mins"`
-	MaxNudges         int    `json:"max_nudges"`
+	Enabled       bool `json:"enabled"`
+	MaxRuns       int  `json:"max_runs"`
+	ReplyWaitMins int  `json:"reply_wait_mins"`
 }
 
 // Reminder mirrors the store row for the console/CLI (read-only view).
 type Reminder struct {
-	ID              int64  `json:"id"`
-	RequesterAddr   string `json:"requester_addr"`
-	TargetName      string `json:"target_name,omitempty"`
-	TargetTransport string `json:"target_transport"`
-	TaskText        string `json:"task_text"`
-	Kind            string `json:"kind"`
-	RecurSpec       string `json:"recur_spec,omitempty"`
-	DeadlineBound   bool   `json:"deadline_bound"`
-	State           string `json:"state"`
-	NextAt          string `json:"next_at,omitempty"`
-	Attempts        int    `json:"attempts"`
+	ID                 int64  `json:"id"`
+	FromName           string `json:"from_name,omitempty"`
+	RecipientTransport string `json:"recipient_transport"`
+	RecipientName      string `json:"recipient_name,omitempty"`
+	Task               string `json:"task"`
+	CarryOver          string `json:"carry_over,omitempty"`
+	State              string `json:"state"`
+	NextAt             string `json:"next_at,omitempty"`
+	Runs               int    `json:"runs"`
 }
 
 func (c *Client) queryJSON(arg string, out any) error {

@@ -9,89 +9,73 @@ import (
 	"github.com/Zouriel/zcoms/client"
 )
 
-// TestTrustGate exercises §6 at creation: owner may remind anyone in contacts; a
-// non-owner allow-listed requester may only target other allow-listed people; and
-// a self reminder is always allowed.
+// §6 trust at creation: owner may remind anyone in contacts; a non-owner
+// allow-listed requester may only target other allow-listed people; self always.
 func TestTrustGate(t *testing.T) {
-	clf := &fakeClassifier{dec: Decision{Kind: "oneoff", PreDelay: time.Hour, PostGap: 15 * time.Minute}}
-	d, _, st := newTestComp(t, clf)
-	d.client.(*fakeClient).contacts = []client.Contact{{ID: 7, Name: "Sara", Telegram: "@sara"}}
+	d, fc, st := newTestComp(t, (&fakeTurn{}).run)
+	fc.contacts = []client.Contact{{ID: 7, Name: "Sara", Telegram: "@sara"}}
 
-	owner := Requester{Transport: "telegram", Handle: "@me", Address: "1", Owner: true}
+	owner := Requester{Transport: "telegram", Handle: "@owner", Address: "1", Name: "you", Owner: true}
 	nonOwner := Requester{Transport: "telegram", Handle: "@ali", Address: "2", Owner: false}
 
-	// Non-owner targeting a non-allow-listed contact → rejected, nothing persisted.
-	got := d.createReply(nonOwner, "remind Sara to send the invoice")
-	if !strings.Contains(got, "allow-listed") {
+	if got := d.createReply(nonOwner, "remind Sara to send the invoice"); !strings.Contains(got, "allow-listed") {
 		t.Fatalf("expected trust rejection, got %q", got)
 	}
 	if rs, _ := st.ListReminders(); len(rs) != 0 {
-		t.Fatalf("rejected reminder should not persist; got %d rows", len(rs))
+		t.Fatalf("rejected reminder should not persist; got %d", len(rs))
 	}
 
-	// Owner may remind anyone in contacts.
 	if got := d.createReply(owner, "remind Sara to send the invoice"); !strings.HasPrefix(got, "✅") {
 		t.Fatalf("owner create failed: %q", got)
 	}
-
-	// Allow-list Sara → the non-owner requester is now permitted.
 	if _, err := st.CreateAllow(store.Owner, store.AllowEntry{Platform: "telegram", Handle: "@sara", MaxRole: "read"}); err != nil {
 		t.Fatalf("seed allow: %v", err)
 	}
 	if got := d.createReply(nonOwner, "remind Sara to call back"); !strings.HasPrefix(got, "✅") {
 		t.Fatalf("non-owner allow-listed create failed: %q", got)
 	}
-
-	// A self reminder is always allowed.
 	if got := d.createReply(nonOwner, "remind me to stretch"); !strings.HasPrefix(got, "✅") {
 		t.Fatalf("self create failed: %q", got)
 	}
 }
 
-func TestProportionate(t *testing.T) {
-	// Near-term task: a 15-min follow-up is clamped to pre+3m.
-	d := proportionate(Decision{Kind: "oneoff", PreDelay: 2 * time.Minute, PostGap: 15 * time.Minute})
-	if d.PostGap != 5*time.Minute {
-		t.Fatalf("near-term post = %v, want 5m", d.PostGap)
-	}
-	// Open-ended task (1h pre): the long follow-up is left alone.
-	d = proportionate(Decision{Kind: "oneoff", PreDelay: time.Hour, PostGap: 15 * time.Minute})
-	if d.PostGap != 15*time.Minute {
-		t.Fatalf("open-ended post = %v, want 15m", d.PostGap)
-	}
-	// Deadline events are event-anchored — untouched.
-	d = proportionate(Decision{Kind: "oneoff", DeadlineBound: true, PreDelay: 2 * time.Minute, PostGap: 20 * time.Minute})
-	if d.PostGap != 20*time.Minute {
-		t.Fatalf("deadline post = %v, want 20m", d.PostGap)
-	}
-	// A floor keeps the gap usable.
-	d = proportionate(Decision{Kind: "oneoff", PreDelay: 30 * time.Second, PostGap: 0})
-	if d.PostGap != 2*time.Minute {
-		t.Fatalf("floor post = %v, want 2m", d.PostGap)
-	}
-}
+// A created reminder lands active, due now (so the first run plans the timing),
+// with the recipient + task set.
+func TestCreatePersistsActiveDueNow(t *testing.T) {
+	d, _, st := newTestComp(t, (&fakeTurn{}).run)
+	owner := Requester{Transport: "telegram", Handle: "@owner", Address: "55", Name: "you", Owner: true}
 
-// TestCreatePersistsAndSchedules checks a created reminder lands in 'scheduled'
-// with a future next_at and the inferred fields.
-func TestCreatePersistsAndSchedules(t *testing.T) {
-	clf := &fakeClassifier{dec: Decision{Kind: "oneoff", PreDelay: time.Hour, PostGap: 15 * time.Minute}}
-	d, _, st := newTestComp(t, clf)
-	owner := Requester{Transport: "telegram", Handle: "@me", Address: "1", Owner: true}
-
-	reply := d.createReply(owner, "remind me to water the plants")
-	if !strings.HasPrefix(reply, "✅") {
-		t.Fatalf("create: %q", reply)
+	if got := d.createReply(owner, "remind me to water the plants"); !strings.HasPrefix(got, "✅") {
+		t.Fatalf("create: %q", got)
 	}
-	rs, _ := st.ListReminders()
+	rs, _ := st.ActiveReminders()
 	if len(rs) != 1 {
-		t.Fatalf("want 1 reminder, got %d", len(rs))
+		t.Fatalf("want 1 active reminder, got %d", len(rs))
 	}
 	r := rs[0]
-	if r.State != store.ReminderScheduled || r.TaskText != "water the plants" {
+	if r.Task != "water the plants" || r.RecipientAddr != "55" || r.State != store.ReminderActive {
 		t.Fatalf("row: %+v", r)
 	}
 	at, err := time.Parse(time.RFC3339, r.NextAt)
-	if err != nil || !at.After(time.Now()) {
-		t.Fatalf("next_at not future: %q (%v)", r.NextAt, err)
+	if err != nil || at.After(time.Now().Add(time.Minute)) {
+		t.Fatalf("first run should be due ~now: %q", r.NextAt)
+	}
+}
+
+// settings round-trip live (no restart).
+func TestSettingsLive(t *testing.T) {
+	d, _, _ := newTestComp(t, (&fakeTurn{}).run)
+	owner := Requester{Owner: true}
+	if got := d.settingsReply(Requester{Owner: false}, []string{"max_runs", "5"}); !strings.Contains(got, "owner") {
+		t.Fatalf("non-owner should be rejected: %q", got)
+	}
+	if got := d.settingsReply(owner, []string{"reply_wait_mins", "3"}); !strings.HasPrefix(got, "✅") {
+		t.Fatalf("set failed: %q", got)
+	}
+	if d.cfg().ReplyWaitMins != 3 {
+		t.Fatalf("live read = %d, want 3", d.cfg().ReplyWaitMins)
+	}
+	if got := d.settingsReply(owner, []string{"nope", "1"}); !strings.Contains(got, "unknown") {
+		t.Fatalf("bad key should be rejected: %q", got)
 	}
 }

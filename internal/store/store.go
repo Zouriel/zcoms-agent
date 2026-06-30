@@ -80,7 +80,7 @@ func Open(path string) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) migrate() error {
-	_, err := s.db.Exec(`
+	if _, err := s.db.Exec(`
 CREATE TABLE IF NOT EXISTS workspaces (
   id INTEGER PRIMARY KEY,
   path TEXT NOT NULL UNIQUE,
@@ -159,9 +159,20 @@ CREATE TABLE IF NOT EXISTS reminders (
 CREATE TABLE IF NOT EXISTS reminder_events (
   id INTEGER PRIMARY KEY,
   reminder_id INTEGER NOT NULL REFERENCES reminders(id) ON DELETE CASCADE,
-  at TEXT, kind TEXT, detail TEXT   -- 'create'|'pre_remind'|'ask_confirm'|'reply'|'snooze'|'done'|'missed'|'cancel'
-);`)
-	return err
+  at TEXT, kind TEXT, detail TEXT   -- 'create'|'run'|'send'|'reply'|'note'|'done'|'cancel'
+);`); err != nil {
+		return err
+	}
+	// The agent-driven refactor: a reminder carries a free-text note ("carry_over")
+	// the per-run agent rewrites each time, plus a run counter (safety cap). Added
+	// to the existing table idempotently.
+	for _, col := range []string{"carry_over TEXT", "runs INTEGER NOT NULL DEFAULT 0"} {
+		if _, err := s.db.Exec(`ALTER TABLE reminders ADD COLUMN ` + col); err != nil &&
+			!strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			return err
+		}
+	}
+	return nil
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }

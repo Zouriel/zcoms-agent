@@ -16,15 +16,13 @@ const remindUsage = "Usage: remind <me|contact name> to <task>  (e.g. \"remind m
 // target is the resolved reminded party.
 type target struct {
 	transport string
-	addr      string // native reply address (chat-id string / jid)
+	addr      string
 	contactID int64
 	name      string
 	isSelf    bool
 }
 
-// HandleCommand runs a `remind …` line from a requester and returns the reply to
-// send back to them. The single entry point for both the bridge (allow-listed
-// user) and the agent.sock/CLI (owner) paths.
+// HandleCommand runs a `remind …` line and returns the reply to the requester.
 func (d *Comp) HandleCommand(req Requester, text string) string {
 	body := strings.TrimSpace(remindRe.ReplaceAllString(text, ""))
 	fields := strings.Fields(body)
@@ -44,68 +42,47 @@ func (d *Comp) HandleCommand(req Requester, text string) string {
 	return d.createReply(req, text)
 }
 
-// createReply parses, resolves the target, enforces §6, classifies, persists, and
-// schedules the first tick — returning the confirmation (or a clear rejection).
+// createReply parses, resolves the recipient, enforces §6, and persists an active
+// reminder due now — the first run is a planning run where the agent decides the
+// real timing.
 func (d *Comp) createReply(req Requester, text string) string {
 	who, task, ok := ParseRemind(text)
 	if !ok {
 		return remindUsage
 	}
+	if !d.cfg().Enabled {
+		return "🔕 Reminders are turned off right now. Switch them back on in the console settings."
+	}
 	tgt, err := d.resolveTarget(req, who)
 	if err != nil {
 		return "⚠️ " + err.Error()
 	}
-
-	cfg := d.cfg()
-	if !cfg.Enabled {
-		return "🔕 Reminders are turned off right now. Switch them back on in the console settings."
-	}
-	now := time.Now()
-	dec := proportionate(applyConfig(d.classify.Classify(task, now), cfg))
-	state, nextAt := firstFire(dec, now)
-
-	r := store.Reminder{
-		RequesterAddr:   req.key(),
-		RequesterName:   req.Name,
-		TargetContactID: tgt.contactID,
-		TargetTransport: tgt.transport,
-		TargetAddr:      tgt.addr,
-		TargetName:      tgt.name,
-		TaskText:        task,
-		Kind:            dec.Kind,
-		RecurSpec:       dec.RecurSpec,
-		DeadlineBound:   dec.DeadlineBound,
-		EventAt:         rfc(dec.EventAt),
-		PreDelaySecs:    int(dec.PreDelay / time.Second),
-		PostGapSecs:     int(dec.PostGap / time.Second),
-		State:           state,
-		NextAt:          rfc(nextAt),
-	}
-	saved, err := d.store.CreateReminder(r)
+	saved, err := d.store.CreateReminder(store.Reminder{
+		FromAddr: req.key(), FromName: req.Name,
+		RecipientTransport: tgt.transport, RecipientAddr: tgt.addr,
+		RecipientName: tgt.name, RecipientContactID: tgt.contactID,
+		Task: task, State: store.ReminderActive, NextAt: rfc(time.Now()),
+	})
 	if err != nil {
 		return "⚠️ couldn't save the reminder: " + err.Error()
 	}
 	d.store.AddReminderEvent(saved.ID, "create", task)
-	d.log.Printf("created #%d for %s (%s) next=%s", saved.ID, tgt.name, dec.Kind, rfc(nextAt))
+	d.log.Printf("created #%d for %s: %s", saved.ID, tgt.name, task)
 
 	who2 := "you"
 	if !tgt.isSelf {
 		who2 = tgt.name
 	}
-	return fmt.Sprintf("✅ Reminder #%d set. I'll remind %s to %s, first nudge %s.",
-		saved.ID, who2, task, humanWhen(nextAt, now))
+	return fmt.Sprintf("✅ Reminder #%d set. I'll remind %s to %s, and sort out the timing.", saved.ID, who2, task)
 }
 
-// resolveTarget resolves <who> to a reachable address and enforces the §6 trust
-// rule: the owner may remind anyone in contacts; a non-owner allow-listed
-// requester may only target other allow-listed people. Enforced once, here,
-// before anything is persisted.
+// resolveTarget resolves <who> to a reachable recipient and enforces §6: the owner
+// may remind anyone in contacts; a non-owner allow-listed requester may only target
+// other allow-listed people. Enforced once, here, before anything is persisted.
 func (d *Comp) resolveTarget(req Requester, who string) (target, error) {
 	if isSelf(who) {
-		addr := strings.TrimSpace(req.Address)
-		tp := req.Transport
+		addr, tp := strings.TrimSpace(req.Address), req.Transport
 		if addr == "" {
-			// agent.sock/CLI owner with an unresolved main chat.
 			if _, oc := d.owner(); oc != 0 {
 				tp, addr = "telegram", itoa(oc)
 			}
@@ -128,12 +105,9 @@ func (d *Comp) resolveTarget(req Requester, who string) (target, error) {
 		return target{}, fmt.Errorf("I don't have a contact named %q. Add them with `zc contacts add`", who)
 	}
 	c := matches[0]
-
-	// §6 trust: non-owner requesters may only target allow-listed people.
 	if !req.Owner && !d.contactAllowListed(c) {
 		return target{}, fmt.Errorf("you can only set reminders for allow-listed people, and %s isn't on the allowlist", c.Name)
 	}
-
 	tp, addr, err := d.reachable(c)
 	if err != nil {
 		return target{}, err
@@ -141,9 +115,8 @@ func (d *Comp) resolveTarget(req Requester, who string) (target, error) {
 	return target{transport: tp, addr: addr, contactID: c.ID, name: c.Name}, nil
 }
 
-// reachable picks the transport+address to reach a contact, preferring Telegram,
-// then WhatsApp (the two routed transports today). Telegram is resolved to a chat
-// id so inbound replies (keyed by chat id) match.
+// reachable picks the transport + address to reach a contact, preferring Telegram
+// (resolved to a chat id so inbound replies match), then WhatsApp.
 func (d *Comp) reachable(c client.Contact) (transport, addr string, err error) {
 	if h := strings.TrimSpace(c.Address("telegram")); h != "" {
 		id, rerr := d.client.Resolve(h)
@@ -169,32 +142,7 @@ func (d *Comp) contactAllowListed(c client.Contact) bool {
 	return false
 }
 
-// settingsReply shows or sets a reminder config knob (owner only). The change is
-// written to agent.db and read live by the engine — no restart.
-func (d *Comp) settingsReply(req Requester, args []string) string {
-	if !req.Owner {
-		return "⚠️ only the owner can change reminder settings"
-	}
-	c := d.cfg()
-	if len(args) == 0 {
-		return fmt.Sprintf("Reminders: enabled=%v, voice=%s, first_nudge=%dm, followup=%dm, deadline_lead=%dm, deadline_after=%dm, max_nudges=%d",
-			c.Enabled, c.Voice, c.FirstNudgeMins, c.FollowupMins, c.DeadlineLeadMins, c.DeadlineAfterMins, c.MaxNudges)
-	}
-	if len(args) < 2 {
-		return "Usage: remind settings <enabled|voice|first_nudge_mins|followup_mins|deadline_lead_mins|deadline_after_mins|max_nudges> <value>"
-	}
-	key := SettingKey(args[0])
-	if key == "" {
-		return "⚠️ unknown reminder setting " + args[0]
-	}
-	val := strings.TrimSpace(strings.Join(args[1:], " "))
-	if err := d.store.SetSetting(store.Owner, key, val); err != nil {
-		return "⚠️ " + err.Error()
-	}
-	return "✅ " + args[0] + " = " + val
-}
-
-// listReply lists the requester's in-flight reminders (the owner sees all).
+// listReply lists the requester's active reminders (the owner sees all).
 func (d *Comp) listReply(req Requester) string {
 	rs, err := d.store.ActiveReminders()
 	if err != nil {
@@ -203,14 +151,17 @@ func (d *Comp) listReply(req Requester) string {
 	var b strings.Builder
 	n := 0
 	for _, r := range rs {
-		if !req.Owner && r.RequesterAddr != req.key() {
+		if !req.Owner && r.FromAddr != req.key() {
 			continue
 		}
-		who := r.TargetName
+		who := r.RecipientName
 		if who == "" {
-			who = r.TargetAddr
+			who = "you"
 		}
-		fmt.Fprintf(&b, "#%d → %s: %s  [%s]\n", r.ID, who, r.TaskText, r.State)
+		fmt.Fprintf(&b, "#%d → %s: %s\n", r.ID, who, r.Task)
+		if r.CarryOver != "" {
+			fmt.Fprintf(&b, "      note: %s\n", r.CarryOver)
+		}
 		n++
 	}
 	if n == 0 {
@@ -219,8 +170,8 @@ func (d *Comp) listReply(req Requester) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// cancelReply cancels a reminder if the requester owns it (owner, the requester
-// who set it, or the reminded party opting out).
+// cancelReply cancels a reminder the requester owns (owner, the setter, or the
+// reminded party opting out).
 func (d *Comp) cancelReply(req Requester, args []string) string {
 	if len(args) == 0 {
 		return "Usage: remind cancel <id>"
@@ -236,7 +187,7 @@ func (d *Comp) cancelReply(req Requester, args []string) string {
 	if !ok {
 		return fmt.Sprintf("No reminder #%d.", id)
 	}
-	if !req.Owner && r.RequesterAddr != req.key() && r.TargetAddr != req.Address {
+	if !req.Owner && r.FromAddr != req.key() && r.RecipientAddr != req.Address {
 		return "⚠️ that reminder isn't yours to cancel"
 	}
 	if err := d.store.CancelReminder(id); err != nil {
@@ -246,94 +197,25 @@ func (d *Comp) cancelReply(req Requester, args []string) string {
 	return fmt.Sprintf("🗑️ Reminder #%d cancelled.", id)
 }
 
-// --- timing helpers ----------------------------------------------------------
-
-// applyConfig folds the owner's tunable defaults into a fresh Decision: a deadline
-// event uses the configured lead/after, an open (non-explicit) task uses the
-// configured first-nudge + follow-up gaps, and an explicitly-timed task keeps its
-// own inferred lead but takes the configured follow-up gap. Recurring timing is
-// event-anchored and left alone.
-func applyConfig(d Decision, c Config) Decision {
-	switch {
-	case d.Kind == "recurring":
-		// leave
-	case d.DeadlineBound:
-		// Config lead is a FLOOR, not an override: a prep/travel task the model
-		// gave a longer lead ("get ready" → 45m) keeps it, but every deadline gets
-		// at least the configured lead so it never fires right at the event.
-		if c.deadlineLead() > d.PreDelay {
-			d.PreDelay = c.deadlineLead()
-		}
-		if d.PostGap <= 0 {
-			d.PostGap = c.deadlineAfter()
-		}
-	case !d.Explicit:
-		d.PreDelay = c.firstNudge()
-		d.PostGap = c.followup()
-	default:
-		d.PostGap = c.followup()
+// settingsReply shows or sets a reminder config knob (owner only), read live.
+func (d *Comp) settingsReply(req Requester, args []string) string {
+	if !req.Owner {
+		return "⚠️ only the owner can change reminder settings"
 	}
-	return d
-}
-
-// proportionate keeps the follow-up gap sensible relative to how soon the task
-// is due: a near-term task ("eat in 2 minutes") shouldn't wait the default 15 min
-// to be checked on. Deadline events are event-anchored, so they're left alone.
-func proportionate(d Decision) Decision {
-	if d.DeadlineBound || d.Kind == "recurring" {
-		return d
+	c := d.cfg()
+	if len(args) == 0 {
+		return fmt.Sprintf("Reminders: enabled=%v, max_runs=%d, reply_wait=%dm", c.Enabled, c.MaxRuns, c.ReplyWaitMins)
 	}
-	if d.PreDelay > 0 && d.PreDelay < 15*time.Minute {
-		if cap := d.PreDelay + 3*time.Minute; d.PostGap > cap {
-			d.PostGap = cap
-		}
+	if len(args) < 2 {
+		return "Usage: remind settings <enabled|max_runs|reply_wait_mins> <value>"
 	}
-	if d.PostGap < 2*time.Minute {
-		d.PostGap = 2 * time.Minute
+	key := SettingKey(args[0])
+	if key == "" {
+		return "⚠️ unknown reminder setting " + args[0]
 	}
-	return d
-}
-
-// firstFire computes the initial state + next tick from a creation Decision.
-func firstFire(d Decision, now time.Time) (state string, at time.Time) {
-	switch {
-	case d.Kind == "recurring" && !d.EventAt.IsZero():
-		return store.ReminderScheduled, d.EventAt
-	case d.DeadlineBound && !d.EventAt.IsZero():
-		at = d.EventAt.Add(-d.PreDelay)
-		if !at.After(now) {
-			at = now.Add(30 * time.Second) // event is imminent — nudge right away
-		}
-		return store.ReminderScheduled, at
-	case !d.EventAt.IsZero():
-		// Explicit act-at time, not a deadline event: pre-remind at the time.
-		return store.ReminderScheduled, d.EventAt
-	default:
-		return store.ReminderScheduled, now.Add(d.PreDelay)
+	val := strings.TrimSpace(strings.Join(args[1:], " "))
+	if err := d.store.SetSetting(store.Owner, key, val); err != nil {
+		return "⚠️ " + err.Error()
 	}
-}
-
-func rfc(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339)
-}
-
-// humanWhen renders an upcoming instant relative to now for a confirmation line.
-func humanWhen(t, now time.Time) string {
-	if t.IsZero() {
-		return "shortly"
-	}
-	d := t.Sub(now)
-	switch {
-	case d < time.Minute:
-		return "in under a minute"
-	case d < time.Hour:
-		return fmt.Sprintf("in about %d min", int(d.Minutes()+0.5))
-	case t.YearDay() == now.YearDay() && t.Year() == now.Year():
-		return "at " + t.Format("3:04 PM")
-	default:
-		return "on " + t.Format("Mon Jan 2 at 3:04 PM")
-	}
+	return "✅ " + args[0] + " = " + val
 }
