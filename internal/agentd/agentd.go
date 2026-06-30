@@ -131,7 +131,7 @@ func (a *Agent) buildRuntimes() error {
 	// Reminders is built before the bridge so the bridge can drive it in-process
 	// for `remind …` commands.
 	a.Reminders = reminders.New(a.Client, a.Store, agents, settings.MainUser, mainChat, seedFn,
-		reminders.NewRunnerClassifier(agents, seedFn))
+		reminders.NewRunnerClassifier(agents, seedFn), reminders.NewRunnerComposer(agents, seedFn))
 
 	a.Bridge = bridge.New(bridge.Deps{
 		Client: a.Client, WAEnabled: settings.WhatsApp.Enabled,

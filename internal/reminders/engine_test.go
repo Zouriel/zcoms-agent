@@ -93,16 +93,16 @@ func TestRoseUntilDone(t *testing.T) {
 	if got := reload(t, st, r.ID); got.State != store.ReminderPreReminded {
 		t.Fatalf("after pre: %s", got.State)
 	}
-	if !strings.Contains(fc.lastText(), "Reminder to buy a rose") {
-		t.Fatalf("pre msg: %q", fc.lastText())
+	if !strings.Contains(fc.lastText(), "buy a rose") || strings.Contains(fc.lastText(), "reply") {
+		t.Fatalf("pre msg should mention the task naturally (no reply hint): %q", fc.lastText())
 	}
 
 	d.advance(reload(t, st, r.ID), now)
 	if got := reload(t, st, r.ID); got.State != store.ReminderAwaiting {
 		t.Fatalf("after confirm: %s", got.State)
 	}
-	if !strings.Contains(fc.lastText(), "Did you buy a rose") {
-		t.Fatalf("confirm msg: %q", fc.lastText())
+	if !strings.Contains(fc.lastText(), "buy a rose") || strings.Contains(fc.lastText(), "reply") {
+		t.Fatalf("confirm msg should ask about the task naturally: %q", fc.lastText())
 	}
 
 	// Negative reply → snoozed.

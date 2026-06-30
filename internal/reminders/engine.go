@@ -47,7 +47,7 @@ func (d *Comp) advance(r store.Reminder, now time.Time) {
 // reminder reschedules its next occurrence here; a one-off advances to the
 // confirm wait.
 func (d *Comp) firePreReminder(r store.Reminder, now time.Time) {
-	d.sendTarget(r, d.preMsg(r))
+	d.sendTarget(r, d.msg(MsgPre, r, 0, 0))
 	d.store.AddReminderEvent(r.ID, "pre_remind", "")
 	if r.Kind == "recurring" {
 		d.scheduleNextRecur(r, now)
@@ -61,7 +61,7 @@ func (d *Comp) firePreReminder(r store.Reminder, now time.Time) {
 // fireConfirm asks whether the task is done (or how the event went), then waits
 // for a reply.
 func (d *Comp) fireConfirm(r store.Reminder, now time.Time) {
-	d.sendTarget(r, d.confirmMsg(r))
+	d.sendTarget(r, d.msg(MsgConfirm, r, 0, 0))
 	d.store.AddReminderEvent(r.ID, "ask_confirm", "")
 	r.State = store.ReminderAwaiting
 	r.NextAt = rfc(now.Add(d.reaskGap(r)))
@@ -80,7 +80,7 @@ func (d *Comp) confirmTimeout(r store.Reminder, now time.Time) {
 		return
 	}
 	r.Attempts++
-	d.sendTarget(r, d.nudgeMsg(r))
+	d.sendTarget(r, d.msg(MsgNudge, r, r.Attempts, 0))
 	d.store.AddReminderEvent(r.ID, "ask_confirm", "re-ask")
 	r.State = store.ReminderAwaiting
 	r.NextAt = rfc(now.Add(d.reaskGap(r)))
@@ -146,7 +146,7 @@ func (d *Comp) feed(transport, addr, _ /*msgRef*/, text string) bool {
 }
 
 func (d *Comp) onConfirmed(r store.Reminder, now time.Time) {
-	d.sendTarget(r, "✅ Nice — marking that done.")
+	d.sendTarget(r, d.msg(MsgDone, r, 0, 0))
 	d.store.AddReminderEvent(r.ID, "done", "")
 	if r.Kind == "recurring" {
 		d.scheduleNextRecur(r, now)
@@ -173,7 +173,7 @@ func (d *Comp) onNegative(r store.Reminder, text string, now time.Time) {
 	if gap <= 0 {
 		gap = d.reaskGap(r)
 	}
-	d.sendTarget(r, "👍 No problem — I'll check back in "+humanDur(gap)+".")
+	d.sendTarget(r, d.msgGap(MsgSnoozeAck, r, humanDur(gap)))
 	d.store.AddReminderEvent(r.ID, "snooze", humanDur(gap))
 	r.State = store.ReminderSnoozed
 	r.NextAt = rfc(now.Add(gap))
@@ -181,7 +181,7 @@ func (d *Comp) onNegative(r store.Reminder, text string, now time.Time) {
 }
 
 func (d *Comp) markMissed(r store.Reminder, now time.Time) {
-	d.sendTarget(r, d.missedMsg(r))
+	d.sendTarget(r, d.msg(MsgMissed, r, 0, 0))
 	d.store.AddReminderEvent(r.ID, "missed", "")
 	r.State = store.ReminderMissed
 	r.NextAt = ""
@@ -274,40 +274,45 @@ func (d *Comp) who(r store.Reminder) string {
 	return "they"
 }
 
-func (d *Comp) preMsg(r store.Reminder) string {
-	switch {
-	case r.Kind == "recurring":
-		return "⏰ " + r.TaskText
-	case r.DeadlineBound:
-		return "⏰ Heads up — " + r.TaskText + d.eventClause(r) + "."
-	default:
-		return "⏰ Reminder to " + r.TaskText + "."
-	}
+// msg writes one humane message for a loop beat: the agent voice (composer) when
+// wired, else the deterministic template. attempt drives motivation escalation on
+// re-nudges.
+func (d *Comp) msg(kind MsgKind, r store.Reminder, attempt int, _ time.Duration) string {
+	return d.msgGap(kind, withAttempt(r, attempt), "")
 }
 
-func (d *Comp) eventClause(r store.Reminder) string {
-	if r.EventAt == "" {
-		return " is coming up"
+func (d *Comp) msgGap(kind MsgKind, r store.Reminder, gap string) string {
+	ctx := d.ctxFor(r, gap)
+	if d.composer != nil {
+		if s := d.composer.Compose(kind, ctx); strings.TrimSpace(s) != "" {
+			return s
+		}
 	}
-	if ev, err := time.Parse(time.RFC3339, r.EventAt); err == nil {
-		return " is coming up at " + ev.Local().Format("3:04 PM")
-	}
-	return " is coming up"
+	return templateLine(kind, ctx)
 }
 
-func (d *Comp) confirmMsg(r store.Reminder) string {
-	if r.DeadlineBound {
-		return "How did " + r.TaskText + " go? (reply \"done\" or \"missed\")"
+// withAttempt stamps the re-ask count onto a copy so ctxFor can read it.
+func withAttempt(r store.Reminder, attempt int) store.Reminder {
+	r.Attempts = attempt
+	return r
+}
+
+func (d *Comp) ctxFor(r store.Reminder, gap string) ComposeCtx {
+	self := r.TargetContactID == 0
+	name := r.TargetName
+	if self {
+		name = ""
 	}
-	return "Did you " + r.TaskText + " yet? (reply \"done\" or \"not yet\")"
-}
-
-func (d *Comp) nudgeMsg(r store.Reminder) string {
-	return "Still need to " + r.TaskText + "? Reply \"done\" once it's sorted."
-}
-
-func (d *Comp) missedMsg(r store.Reminder) string {
-	return "Looks like " + r.TaskText + " has passed. Want me to help reschedule it?"
+	ev := ""
+	if r.EventAt != "" {
+		if t, err := time.Parse(time.RFC3339, r.EventAt); err == nil {
+			ev = t.Local().Format("Mon 3:04 PM")
+		}
+	}
+	return ComposeCtx{
+		Task: r.TaskText, TargetName: name, Self: self,
+		DeadlineBound: r.DeadlineBound, EventLocal: ev, Attempt: r.Attempts, Gap: gap,
+	}
 }
 
 // optOutRe matches a reply that opts a reminder out entirely.
