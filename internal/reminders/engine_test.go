@@ -14,8 +14,9 @@ import (
 
 // fakeClient records outbound sends so the engine's behavior is observable.
 type fakeClient struct {
-	sent  []string // "transport|addr|text"
-	marks int
+	sent     []string // "transport|addr|text"
+	marks    int
+	contacts []client.Contact
 }
 
 func (f *fakeClient) SendOn(transport, to, text string) (client.Response, error) {
@@ -23,9 +24,15 @@ func (f *fakeClient) SendOn(transport, to, text string) (client.Response, error)
 	return client.Response{}, nil
 }
 func (f *fakeClient) MarkReadOn(string, string, []string) error { f.marks++; return nil }
-func (f *fakeClient) Resolve(string) (int64, error)             { return 0, nil }
-func (f *fakeClient) ResolveContact(string) ([]client.Contact, error) {
-	return nil, nil
+func (f *fakeClient) Resolve(string) (int64, error)             { return 1, nil }
+func (f *fakeClient) ResolveContact(who string) ([]client.Contact, error) {
+	var out []client.Contact
+	for _, c := range f.contacts {
+		if strings.HasPrefix(strings.ToLower(c.Name), strings.ToLower(who)) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeClient) lastText() string {

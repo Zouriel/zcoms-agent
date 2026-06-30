@@ -57,6 +57,21 @@ type Session struct {
 	Backend    string `json:"backend"`
 }
 
+// Reminder mirrors the store row for the console/CLI (read-only view).
+type Reminder struct {
+	ID              int64  `json:"id"`
+	RequesterAddr   string `json:"requester_addr"`
+	TargetName      string `json:"target_name,omitempty"`
+	TargetTransport string `json:"target_transport"`
+	TaskText        string `json:"task_text"`
+	Kind            string `json:"kind"`
+	RecurSpec       string `json:"recur_spec,omitempty"`
+	DeadlineBound   bool   `json:"deadline_bound"`
+	State           string `json:"state"`
+	NextAt          string `json:"next_at,omitempty"`
+	Attempts        int    `json:"attempts"`
+}
+
 func (c *Client) queryJSON(arg string, out any) error {
 	reply, err := c.do(request{Text: "json " + arg})
 	if err != nil {
@@ -93,6 +108,18 @@ func (c *Client) QuerySettings() (map[string]string, error) {
 func (c *Client) QueryTriageGroups() ([]TriageGroup, error) {
 	var out []TriageGroup
 	return out, c.queryJSON("triage-groups", &out)
+}
+
+// Reminders returns every reminder (active + terminal), newest first.
+func (c *Client) Reminders() ([]Reminder, error) {
+	var out []Reminder
+	return out, c.queryJSON("reminders", &out)
+}
+
+// Remind runs a `remind …` command (create / list / cancel) through the agent and
+// returns its human reply. The console/CLI create + cancel reminders this way.
+func (c *Client) Remind(line string) (string, error) {
+	return c.Command("remind "+line, "")
 }
 
 // Sessions returns the live sessions (decorated) for a workspace id.

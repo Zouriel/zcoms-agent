@@ -66,6 +66,8 @@ func (a *Agent) jsonQuery(args []string) (string, error) {
 		v, err = a.Store.ListAllow()
 	case "triage-groups":
 		v, err = a.Store.ListTriageGroups()
+	case "reminders":
+		v, err = a.Store.ListReminders()
 	case "settings":
 		v, err = a.Store.ListSettings()
 	case "sessions":
