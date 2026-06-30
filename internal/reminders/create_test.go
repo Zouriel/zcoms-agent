@@ -62,6 +62,34 @@ func TestCreatePersistsActiveDueNow(t *testing.T) {
 	}
 }
 
+// Registration runs a planning turn so lead time is decided up front and the
+// first run is scheduled ahead (not at creation).
+func TestRegistrationPlansLeadTime(t *testing.T) {
+	ft := &fakeTurn{outs: []string{"NEXT: +45m\nNOTE: nudge to get ready, ~45m before class"}}
+	d, _, st := newTestComp(t, ft.run)
+	owner := Requester{Transport: "telegram", Handle: "@owner", Address: "7", Name: "you", Owner: true}
+
+	reply := d.createReply(owner, "remind me to get ready for class at 6")
+	if !strings.HasPrefix(reply, "✅") || !strings.Contains(reply, "starting") {
+		t.Fatalf("confirmation should state the planned time: %q", reply)
+	}
+	rs, _ := st.ActiveReminders()
+	if len(rs) != 1 {
+		t.Fatalf("want 1 reminder, got %d", len(rs))
+	}
+	r := rs[0]
+	at, err := time.Parse(time.RFC3339, r.NextAt)
+	if err != nil {
+		t.Fatalf("next_at: %v", err)
+	}
+	if d := time.Until(at); d < 40*time.Minute || d > 50*time.Minute {
+		t.Fatalf("first run not ~45m out: %v", d)
+	}
+	if r.CarryOver == "" {
+		t.Fatal("carry_over from the plan not stored")
+	}
+}
+
 // settings round-trip live (no restart).
 func TestSettingsLive(t *testing.T) {
 	d, _, _ := newTestComp(t, (&fakeTurn{}).run)

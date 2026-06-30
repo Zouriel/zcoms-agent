@@ -33,6 +33,52 @@ func NewAgentTurn(backendFn func() runner.Backend) AgentTurn {
 	}
 }
 
+// planFirst asks the agent, at registration, WHEN to first reach out — so lead
+// time (get-ready, travel) is decided up front and the confirmation can say when.
+// Best-effort: on any failure it falls back to "now" (the first run will plan).
+func (d *Comp) planFirst(r store.Reminder, now time.Time) (time.Time, string) {
+	if d.turn == nil {
+		return now, ""
+	}
+	seed := ""
+	if d.seed != nil {
+		seed = d.seed(personas.Reminders)
+	}
+	out, _, err := d.turn(withSeed(seed, firstPlanPrompt(r, now)), "")
+	if err != nil {
+		d.log.Printf("plan: %v", err)
+		return now, ""
+	}
+	f := parseFields(out)
+	note := strings.TrimSpace(f["note"])
+	nx := strings.TrimSpace(f["next"])
+	if nx == "" || strings.EqualFold(nx, "now") {
+		return now, note
+	}
+	if t, err := parseWhen(nx, now); err == nil {
+		return t, note
+	}
+	return now, note
+}
+
+func firstPlanPrompt(r store.Reminder, now time.Time) string {
+	from := strings.TrimSpace(r.FromName)
+	if from == "" {
+		from = "the owner"
+	}
+	return strings.Join([]string{
+		"A new reminder was just set. Decide WHEN you should first reach out about it.",
+		"Task: " + quote(r.Task),
+		"Set by: " + from + ". You will be reminding: " + recipientLabel(r) + ".",
+		"Right now it is " + now.Format("Mon 2006-01-02 3:04 PM") + " (local time).",
+		"",
+		"Think about lead time. If this is a 'get ready for / leave for / head to / be at' task tied to a time, reach out WELL BEFORE that time so there is time to actually do it (getting ready often needs 30 to 45 minutes; travel needs the travel time). If they named a time (\"in 20 minutes\", \"at 6\"), honour it, adding lead if it is preparation. If it is open-ended, pick a sensible first moment.",
+		"Reply EXACTLY in these two lines and nothing else:",
+		"NEXT: when to first reach out. NOW to reach out right away, or a relative time like +45m, +2h or +1d, or an absolute local time like 2026-07-01T17:15.",
+		"NOTE: a short note to your future self (the event time, the lead you are giving, what the first message should do).",
+	}, "\n")
+}
+
 // FireDue is the scheduler-tick entry: it spins up a run for each active reminder
 // whose next_at has arrived (skipping any already mid-run).
 func (d *Comp) FireDue() {

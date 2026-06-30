@@ -57,23 +57,45 @@ func (d *Comp) createReply(req Requester, text string) string {
 	if err != nil {
 		return "⚠️ " + err.Error()
 	}
+
+	// The agent plans the first reach-out time at registration, so lead time (e.g.
+	// nudge before you have to get ready) is decided up front, not on a later run.
+	now := time.Now()
+	at, note := d.planFirst(store.Reminder{
+		Task: task, FromName: req.Name, RecipientName: tgt.name, RecipientContactID: tgt.contactID,
+	}, now)
+
 	saved, err := d.store.CreateReminder(store.Reminder{
 		FromAddr: req.key(), FromName: req.Name,
 		RecipientTransport: tgt.transport, RecipientAddr: tgt.addr,
 		RecipientName: tgt.name, RecipientContactID: tgt.contactID,
-		Task: task, State: store.ReminderActive, NextAt: rfc(time.Now()),
+		Task: task, State: store.ReminderActive, NextAt: rfc(at), CarryOver: note,
 	})
 	if err != nil {
 		return "⚠️ couldn't save the reminder: " + err.Error()
 	}
 	d.store.AddReminderEvent(saved.ID, "create", task)
-	d.log.Printf("created #%d for %s: %s", saved.ID, tgt.name, task)
+	if note != "" {
+		d.store.AddReminderEvent(saved.ID, "note", note)
+	}
+	d.log.Printf("created #%d for %s: %s (first at %s)", saved.ID, tgt.name, task, rfc(at))
 
 	who2 := "you"
 	if !tgt.isSelf {
 		who2 = tgt.name
 	}
-	return fmt.Sprintf("✅ Reminder #%d set. I'll remind %s to %s, and sort out the timing.", saved.ID, who2, task)
+	return fmt.Sprintf("✅ Reminder #%d set. I'll remind %s to %s%s.", saved.ID, who2, task, whenClause(at, now))
+}
+
+// whenClause renders the planned first reach-out time for the confirmation line.
+func whenClause(at, now time.Time) string {
+	if !at.After(now.Add(90 * time.Second)) {
+		return ", starting now"
+	}
+	if at.YearDay() == now.YearDay() && at.Year() == now.Year() {
+		return ", starting around " + at.Local().Format("3:04 PM")
+	}
+	return ", starting " + at.Local().Format("Mon Jan 2 at 3:04 PM")
 }
 
 // resolveTarget resolves <who> to a reachable recipient and enforces §6: the owner
