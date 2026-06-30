@@ -247,29 +247,56 @@ func WADigits(s string) string {
 // reduce to digits. Both the stored allow-list and an inbound sender go through
 // here, so matching is platform-aware and format-insensitive.
 func AllowKey(platform, handle string) string {
-	switch strings.ToLower(strings.TrimSpace(platform)) {
+	switch p := strings.ToLower(strings.TrimSpace(platform)); p {
 	case "whatsapp":
 		return "whatsapp|" + WADigits(handle)
-	default:
+	case "", "telegram":
 		h := strings.ToLower(strings.TrimSpace(handle))
 		if h != "" && !strings.HasPrefix(h, "@") && !looksLikePhone(h) {
 			h = "@" + h
 		}
 		return "telegram|" + h
+	default:
+		// instagram / discord / viber and any future transport: a bare,
+		// lower-cased handle (leading @ stripped). Stored correctly now even
+		// though only telegram + whatsapp are routed yet.
+		h := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(handle), "@"))
+		return p + "|" + h
 	}
 }
 
 // NormalizeAllowHandle tidies a handle for storage/display: a Telegram username
 // gets its leading @ (a phone is left alone); a WhatsApp number reduces to digits.
 func NormalizeAllowHandle(platform, handle string) string {
-	if strings.EqualFold(strings.TrimSpace(platform), "whatsapp") {
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "whatsapp":
 		return WADigits(handle)
+	case "", "telegram":
+		h := strings.TrimSpace(handle)
+		if h != "" && !strings.HasPrefix(h, "@") && !looksLikePhone(h) {
+			h = "@" + h
+		}
+		return h
+	default:
+		// instagram / discord / viber: store the bare handle (no leading @).
+		return strings.TrimPrefix(strings.TrimSpace(handle), "@")
 	}
-	h := strings.TrimSpace(handle)
-	if h != "" && !strings.HasPrefix(h, "@") && !looksLikePhone(h) {
-		h = "@" + h
+}
+
+// AllowPlatforms is the set of platforms an allow-list entry may target. Only
+// telegram + whatsapp are routed today; the rest are stored for when their
+// transports come online (so adding a contact's every channel is lossless).
+var AllowPlatforms = []string{"telegram", "whatsapp", "instagram", "discord", "viber"}
+
+// IsAllowPlatform reports whether s names a known allow-list platform.
+func IsAllowPlatform(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	for _, p := range AllowPlatforms {
+		if p == s {
+			return true
+		}
 	}
-	return h
+	return false
 }
 
 func looksLikePhone(s string) bool {

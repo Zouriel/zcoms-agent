@@ -329,7 +329,7 @@ func (a *Agent) allowlistCmd(args []string) (string, error) {
 		// valid role keyword.
 		rest := args[1:]
 		platform := "telegram"
-		if len(rest) > 0 && (strings.EqualFold(rest[0], "telegram") || strings.EqualFold(rest[0], "whatsapp")) {
+		if len(rest) > 0 && runner.IsAllowPlatform(rest[0]) {
 			platform = strings.ToLower(rest[0])
 			rest = rest[1:]
 		}
@@ -339,7 +339,7 @@ func (a *Agent) allowlistCmd(args []string) (string, error) {
 			rest = rest[:len(rest)-1]
 		}
 		if len(rest) < 1 {
-			return "", fmt.Errorf("usage: allowlist add [telegram|whatsapp] <@handle|number> [read|confirm|edit|full]")
+			return "", fmt.Errorf("usage: allowlist add [telegram|whatsapp|instagram|discord|viber] <@handle|number> [read|confirm|edit|full]")
 		}
 		handle := runner.NormalizeAllowHandle(platform, strings.Join(rest, " "))
 		_, err := a.Store.CreateAllow(store.Owner, store.AllowEntry{Platform: platform, Handle: handle, MaxRole: role})
