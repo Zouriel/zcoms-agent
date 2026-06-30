@@ -160,6 +160,10 @@ func (a *Agent) registerJobs() {
 	// inbound arrives over the daemon subscribe stream, so there are no sidecar
 	// polls — the Node Baileys sidecar is retired.
 	a.Sched.Interval("scheduled-errands", 30*time.Second, a.Errands.FireDueScheduled)
+	// Reminders are advanced from one coarse tick that scans the reminders table
+	// for due rows (like triage) — so a reminder that came due during downtime
+	// fires on the first tick after a restart, with no in-memory state to rebuild.
+	a.Sched.Interval("reminders-tick", 30*time.Second, a.Reminders.FireDue)
 	a.Sched.Interval("workspace-discovery", 10*time.Minute, func() { _, _ = a.Registry.Sync() })
 }
 
@@ -337,15 +341,23 @@ func (a *Agent) subscribe(ctx context.Context) {
 			switch transportOf(ev) {
 			case "whatsapp":
 				// Daemon-delivered WhatsApp (whatsmeow): an errand-owned chat goes
-				// to errands, everything else to the bridge.
+				// to errands, a reminder-owned chat to reminders, else the bridge.
 				if a.Errands.OwnsWA(ev.Address) {
 					a.Errands.FeedWhatsApp(ev.Address, ev.MsgRef, ev.Text, ev.File)
+					return
+				}
+				if a.Reminders.OwnsWA(ev.Address) {
+					a.Reminders.FeedWhatsApp(ev.Address, ev.MsgRef, ev.Text)
 					return
 				}
 				a.Bridge.HandleEvent(ev)
 			default: // telegram (Instagram joins the bridge path later)
 				if a.Errands.Owns(ev.ChatID) {
 					a.Errands.FeedTelegram(ev.ChatID, ev.MessageID, ev.Text, ev.File)
+					return
+				}
+				if a.Reminders.Owns(ev.ChatID) {
+					a.Reminders.FeedTelegram(ev.ChatID, ev.Text)
 					return
 				}
 				a.Bridge.HandleEvent(ev)

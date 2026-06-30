@@ -18,11 +18,21 @@ import (
 	"github.com/Zouriel/zcoms/client"
 )
 
+// commsClient is the slice of the comms client the reminders runtime uses: send
+// on a transport, clear a WhatsApp unread, and resolve a name/handle. *client.Client
+// satisfies it; a fake satisfies it in tests.
+type commsClient interface {
+	SendOn(transport, to, text string) (client.Response, error)
+	MarkReadOn(transport, address string, refs []string) error
+	Resolve(to string) (int64, error)
+	ResolveContact(name string) ([]client.Contact, error)
+}
+
 // Comp is the reminders runtime. The store (agent.db) is the source of truth — the
 // scheduler tick and the reply matcher both read it fresh — so the loop survives a
 // restart with no in-memory state to rebuild.
 type Comp struct {
-	client   *client.Client
+	client   commsClient
 	store    *store.Store
 	agents   runner.AgentConfig
 	classify Classifier

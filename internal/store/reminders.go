@@ -175,12 +175,14 @@ func (s *Store) DueReminders(nowRFC string) ([]Reminder, error) {
 }
 
 // OpenReminderForTarget returns the in-flight reminder a reply on (transport,
-// addr) should advance: the most recent non-terminal reminder for that party,
-// preferring one already awaiting_confirm. ok=false when none.
+// addr) should advance: the most recent *engaged* reminder for that party — one
+// whose pre-reminder has already gone out (pre_reminded / awaiting_confirm /
+// snoozed). A merely-scheduled reminder is excluded, so an unrelated message
+// before the first nudge falls through to the bridge instead of being swallowed.
 func (s *Store) OpenReminderForTarget(transport, addr string) (Reminder, bool, error) {
 	rs, err := s.reminderQuery(`SELECT `+reminderCols+` FROM reminders
 		WHERE target_transport=? AND target_addr=?
-		  AND state IN ('scheduled','pre_reminded','awaiting_confirm','snoozed')
+		  AND state IN ('pre_reminded','awaiting_confirm','snoozed')
 		ORDER BY (state='awaiting_confirm') DESC, id DESC`, transport, addr)
 	if err != nil || len(rs) == 0 {
 		return Reminder{}, false, err
