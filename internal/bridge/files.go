@@ -64,10 +64,18 @@ func (d *Comp) dispatchAgentTurn(st *userState, text string) {
 		prompt = "(Files I just sent you, saved in this project — read them from there: " +
 			strings.Join(files, ", ") + ")\n\n" + text
 	}
+	// Prepend who is speaking on EVERY turn (not just the first): the seed is
+	// cleared after turn one, so first-turn-only framing lets a resumed session
+	// drift back to assuming the owner. requesterFor distinguishes the owner from
+	// a trusted non-owner (e.g. a family member) so the agent addresses the right
+	// person and never mistakes one for the other.
+	speaker := d.speakerLine(st)
 	if seed != "" {
-		// First turn of an interactive-triage session: prepend the recipient
-		// table + SEND-directive instructions ahead of the owner's instruction.
-		prompt = seed + "\nThe owner says:\n" + prompt
+		// First turn of a chat/coding/interactive-triage session: prepend the
+		// seed (and any recipient table + SEND directives) ahead of the speaker.
+		prompt = seed + "\n" + speaker + "\n" + prompt
+	} else {
+		prompt = speaker + "\n" + prompt
 	}
 
 	role2 := role

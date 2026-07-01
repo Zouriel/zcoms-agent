@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Zouriel/zcoms/client"
@@ -78,6 +79,23 @@ func TestSetAllowEvictsRemoved(t *testing.T) {
 	d.SetAllow(Allowlist{"telegram|@alice": {Role: RoleRead}, "whatsapp|9607654321": {Role: RoleRead}})
 	if d.stateFor(client.Event{Transport: "whatsapp", Address: jid}) == nil {
 		t.Fatal("re-added WhatsApp number not served after SetAllow")
+	}
+}
+
+// The per-turn speaker line names the actual requester and marks a non-owner as
+// NOT the owner, so a chat session can no longer mistake the wife for the owner.
+func TestSpeakerLineDistinguishesOwner(t *testing.T) {
+	d := testComp()
+	d.settings = Settings{MainUser: "@ZourielCorbet"}
+
+	owner := d.speakerLine(&userState{username: "@ZourielCorbet", transport: "telegram", address: "1"})
+	if !strings.Contains(owner, "@ZourielCorbet") || strings.Contains(owner, "NOT the owner") {
+		t.Fatalf("owner should be framed as the owner: %q", owner)
+	}
+
+	wife := d.speakerLine(&userState{username: "@reiniellle", transport: "telegram", address: "2"})
+	if !strings.Contains(wife, "@reiniellle") || !strings.Contains(wife, "NOT the owner") {
+		t.Fatalf("non-owner should be named and marked NOT the owner: %q", wife)
 	}
 }
 

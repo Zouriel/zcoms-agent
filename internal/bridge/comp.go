@@ -189,6 +189,24 @@ func (d *Comp) requesterFor(st *userState) reminders.Requester {
 	}
 }
 
+// speakerLine frames who the agent is talking to on this turn, so a general
+// chat/coding session never mistakes an allow-listed non-owner (e.g. a family
+// member) for the owner. Prepended to each turn's prompt; the owner check is the
+// same deterministic main_user comparison requesterFor uses.
+func (d *Comp) speakerLine(st *userState) string {
+	r := d.requesterFor(st)
+	who := strings.TrimSpace(r.Handle)
+	if who == "" {
+		who = "an allow-listed user"
+	}
+	if r.Owner {
+		return "The owner (" + who + ") says:"
+	}
+	return "You are talking to " + who + ", a trusted allow-listed user who is NOT the owner. " +
+		"Address them directly. Do not assume owner-only context, act as if they were the owner, " +
+		"or reveal the owner's private information. They say:"
+}
+
 // isTeamCommand reports whether a message should be routed to the zc-team
 // component (lowercased text).
 func isTeamCommand(lower string) bool {
