@@ -75,7 +75,8 @@ func (s *Store) CreatePersona(c Caller, p Persona) (Persona, error) {
 	}
 	res, err := s.db.Exec(
 		`INSERT INTO agent_personas(key, display_name, backend, model, seed_prompt, updated_at) VALUES(?,?,?,?,?,?)`,
-		p.Key, p.DisplayName, strings.ToLower(p.Backend), p.Model, p.SeedPrompt, now())
+		p.Key, p.DisplayName, strings.ToLower(p.Backend), p.Model, p.SeedPrompt, now(),
+	)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return p, fmt.Errorf("persona %q already exists", p.Key)
@@ -99,7 +100,8 @@ func (s *Store) UpdatePersona(c Caller, key string, p Persona) error {
 	}
 	res, err := s.db.Exec(
 		`UPDATE agent_personas SET display_name=?, backend=?, model=?, seed_prompt=?, updated_at=? WHERE key=?`,
-		p.DisplayName, strings.ToLower(p.Backend), p.Model, p.SeedPrompt, now(), key)
+		p.DisplayName, strings.ToLower(p.Backend), p.Model, p.SeedPrompt, now(), key,
+	)
 	if err != nil {
 		return err
 	}

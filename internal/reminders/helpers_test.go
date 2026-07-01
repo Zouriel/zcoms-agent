@@ -22,9 +22,9 @@ func (f *fakeClient) SendOn(transport, to, text string) (client.Response, error)
 	f.sent = append(f.sent, transport+"|"+to+"|"+text)
 	return client.Response{}, nil
 }
-func (f *fakeClient) MarkRead(int64, []int64) error            { f.marks++; return nil }
+func (f *fakeClient) MarkRead(int64, []int64) error             { f.marks++; return nil }
 func (f *fakeClient) MarkReadOn(string, string, []string) error { f.marks++; return nil }
-func (f *fakeClient) Resolve(string) (int64, error)            { return 1, nil }
+func (f *fakeClient) Resolve(string) (int64, error)             { return 1, nil }
 func (f *fakeClient) ResolveContact(who string) ([]client.Contact, error) {
 	var out []client.Contact
 	for _, c := range f.contacts {
@@ -34,6 +34,7 @@ func (f *fakeClient) ResolveContact(who string) ([]client.Contact, error) {
 	}
 	return out, nil
 }
+
 func (f *fakeClient) lastText() string {
 	if len(f.sent) == 0 {
 		return ""

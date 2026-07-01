@@ -21,9 +21,9 @@ const (
 
 // Config is the live, owner-tunable reminder behaviour.
 type Config struct {
-	Enabled      bool `json:"enabled"`
-	MaxRuns      int  `json:"max_runs"`        // safety cap on total runs per reminder
-	ReplyWaitMins int `json:"reply_wait_mins"` // how long a run waits for the reply
+	Enabled       bool `json:"enabled"`
+	MaxRuns       int  `json:"max_runs"`        // safety cap on total runs per reminder
+	ReplyWaitMins int  `json:"reply_wait_mins"` // how long a run waits for the reply
 }
 
 func DefaultConfig() Config {

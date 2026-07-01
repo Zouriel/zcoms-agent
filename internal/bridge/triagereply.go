@@ -151,7 +151,8 @@ func (d *Comp) startTriageReply(st *userState) {
 	}
 	d.send(st.route(), fmt.Sprintf(
 		"🗂 Interactive triage on (%s) — %d recipient(s) from the last batch (%s).\nTell me who to reply to. `end` to finish.",
-		memory, len(batch.Recipients), humanAgo(batch.At)))
+		memory, len(batch.Recipients), humanAgo(batch.At),
+	))
 }
 
 // resetTriageBrain clears the persistent triage session so the next pass starts

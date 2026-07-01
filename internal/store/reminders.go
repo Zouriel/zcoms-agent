@@ -87,7 +87,8 @@ func (s *Store) CreateReminder(r Reminder) (Reminder, error) {
 		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.FromAddr, nullable(r.FromName), r.RecipientTransport, r.RecipientAddr,
 		nullable(r.RecipientName), r.RecipientContactID, r.Task, nullable(r.CarryOver),
-		nullable(r.NextAt), r.State, r.Runs, r.CreatedAt, r.UpdatedAt)
+		nullable(r.NextAt), r.State, r.Runs, r.CreatedAt, r.UpdatedAt,
+	)
 	if err != nil {
 		return r, err
 	}
@@ -101,7 +102,8 @@ func (s *Store) UpdateReminder(r Reminder) error {
 	r.UpdatedAt = now()
 	res, err := s.db.Exec(
 		`UPDATE reminders SET carry_over=?, next_at=?, state=?, runs=?, updated_at=? WHERE id=?`,
-		nullable(r.CarryOver), nullable(r.NextAt), r.State, r.Runs, r.UpdatedAt, r.ID)
+		nullable(r.CarryOver), nullable(r.NextAt), r.State, r.Runs, r.UpdatedAt, r.ID,
+	)
 	if err != nil {
 		return err
 	}

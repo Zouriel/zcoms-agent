@@ -41,7 +41,8 @@ func (s *Store) SetSetting(c Caller, key, value string) error {
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO settings(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
-		key, value)
+		key, value,
+	)
 	return err
 }
 

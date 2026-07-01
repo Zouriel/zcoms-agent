@@ -22,7 +22,7 @@ import (
 // commsClient is the slice of the comms client the reminders runtime uses.
 type commsClient interface {
 	SendOn(transport, to, text string) (client.Response, error)
-	MarkRead(chatID int64, messageIDs []int64) error            // Telegram
+	MarkRead(chatID int64, messageIDs []int64) error           // Telegram
 	MarkReadOn(transport, address string, refs []string) error // other transports
 	Resolve(to string) (int64, error)
 	ResolveContact(name string) ([]client.Contact, error)
@@ -111,5 +111,5 @@ func (d *Comp) allowSet() map[string]bool {
 	return set
 }
 
-func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+func itoa(n int64) string  { return strconv.FormatInt(n, 10) }
 func norm(s string) string { return strings.ToLower(strings.TrimSpace(s)) }

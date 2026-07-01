@@ -31,11 +31,11 @@ import (
 
 // Agent is the unified runtime.
 type Agent struct {
-	Store    *store.Store
-	Registry *workspaces.Registry
-	Sessions *sessions.Manager
-	Sched    *scheduler.Scheduler
-	Client   *client.Client
+	Store     *store.Store
+	Registry  *workspaces.Registry
+	Sessions  *sessions.Manager
+	Sched     *scheduler.Scheduler
+	Client    *client.Client
 	Bridge    *bridge.Comp
 	Errands   *errands.Comp
 	Reminders *reminders.Comp

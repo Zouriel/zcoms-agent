@@ -334,7 +334,8 @@ func (d *Comp) startChat(st *userState) {
 	d.send(st.route(), fmt.Sprintf(
 		"💬 Chat on — general-purpose assistant in %s (role: %s).\n"+
 			"I can create/edit files, run commands, SSH into servers, etc. "+
-			"Send `new` to reset the session or `end` to detach.", home, role))
+			"Send `new` to reset the session or `end` to detach.", home, role,
+	))
 }
 
 func (d *Comp) startNew(st *userState) {

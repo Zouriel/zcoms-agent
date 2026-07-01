@@ -19,7 +19,8 @@ type Session struct {
 func (s *Store) ListSessionDecorations(workspaceID int64) (map[string]Session, error) {
 	rows, err := s.db.Query(
 		`SELECT id, workspace_id, backend, external_id, COALESCE(label,'') FROM sessions WHERE workspace_id=?`,
-		workspaceID)
+		workspaceID,
+	)
 	if err != nil {
 		return nil, err
 	}

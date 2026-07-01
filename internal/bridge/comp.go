@@ -31,7 +31,7 @@ type Comp struct {
 	settings         Settings
 	mainChatID       int64
 	personaSeed      func(key string) string
-	reminders        *reminders.Comp        // in-process reminder loop (may be nil)
+	reminders        *reminders.Comp         // in-process reminder loop (may be nil)
 	phrase           func(key string) string // editable canned messages (may be nil)
 
 	mu       sync.Mutex

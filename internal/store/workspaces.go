@@ -150,7 +150,8 @@ func (s *Store) UpsertDiscovered(path, derivedName string) error {
 	}
 	_, err = s.db.Exec(
 		`INSERT INTO workspaces(path, name, discovered, present, created_at, updated_at) VALUES(?,?,1,1,?,?)`,
-		path, derivedName, now(), now())
+		path, derivedName, now(), now(),
+	)
 	return err
 }
 
