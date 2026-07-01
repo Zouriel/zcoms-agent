@@ -1,6 +1,6 @@
 module github.com/Zouriel/zcoms-agent
 
-go 1.25.6
+go 1.25.10
 
 require (
 	github.com/Zouriel/zcoms v1.1.0
