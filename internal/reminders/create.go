@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
 	"github.com/Zouriel/zcoms/client"
@@ -46,7 +47,7 @@ func (d *Comp) HandleCommand(req Requester, text string) string {
 // reminder due now — the first run is a planning run where the agent decides the
 // real timing.
 func (d *Comp) createReply(req Requester, text string) string {
-	who, task, ok := ParseRemind(text)
+	who, task, ok := d.interpretRemind(req, text)
 	if !ok {
 		return remindUsage
 	}
@@ -85,6 +86,56 @@ func (d *Comp) createReply(req Requester, text string) string {
 		who2 = tgt.name
 	}
 	return fmt.Sprintf("✅ Reminder #%d set. I'll remind %s to %s%s.", saved.ID, who2, task, whenClause(at, now))
+}
+
+// interpretRemind reads a natural-language reminder request through the reminder
+// agent and pulls out who it's for and what the task is, so everyday phrasings
+// work — e.g. "remind Zouriel that he has to come pick me up at 11:45", which the
+// old regex split on the first " to " and mis-took the name as "Zouriel that he
+// has". It falls back to the regex ParseRemind when there's no backend, the turn
+// errors, or it comes back empty, so the command still works headless and in tests.
+// Only text extraction is delegated: the §6 trust gate stays deterministic in
+// resolveTarget, which never trusts this output for access.
+func (d *Comp) interpretRemind(req Requester, text string) (who, task string, ok bool) {
+	if d.turn == nil {
+		return ParseRemind(text)
+	}
+	seed := ""
+	if d.seed != nil {
+		seed = d.seed(personas.Reminders)
+	}
+	out, _, err := d.turn(withSeed(seed, interpretPrompt(req, text)), "")
+	if err != nil {
+		d.log.Printf("interpret: %v", err)
+		return ParseRemind(text)
+	}
+	f := parseFields(out)
+	who, task = strings.TrimSpace(f["who"]), strings.TrimSpace(f["task"])
+	if who == "" || task == "" {
+		return ParseRemind(text)
+	}
+	return who, task, true
+}
+
+// interpretPrompt asks the agent to read the raw request and return just the
+// target and the task on two fixed lines (parsed by parseFields).
+func interpretPrompt(req Requester, text string) string {
+	me := strings.TrimSpace(req.Name)
+	if me == "" {
+		me = "the person talking to you"
+	}
+	return strings.Join([]string{
+		"Someone sent you a request to set a reminder. Read it and pull out two things: WHO the reminder is for, and WHAT they need to be reminded of.",
+		"Their exact message: " + quote(text),
+		"The person asking is " + me + ". If the reminder is for themselves, WHO is the single word me.",
+		"",
+		"Rules:",
+		"- WHO is only the person's name as they referred to them (a first name is fine), or the single word me for the asker. Never fold connecting words (\"that\", \"to\") or any of the task into WHO.",
+		"- TASK is what needs doing, phrased so it reads naturally right after the word \"to\" (for example \"come pick me up at 11:45\", \"send the invoice\"). Keep any time or place they mentioned.",
+		"Reply EXACTLY in these two lines and nothing else:",
+		"WHO: the name, or me",
+		"TASK: the task",
+	}, "\n")
 }
 
 // whenClause renders the planned first reach-out time for the confirmation line.

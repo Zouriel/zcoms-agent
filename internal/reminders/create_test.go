@@ -65,7 +65,10 @@ func TestCreatePersistsActiveDueNow(t *testing.T) {
 // Registration runs a planning turn so lead time is decided up front and the
 // first run is scheduled ahead (not at creation).
 func TestRegistrationPlansLeadTime(t *testing.T) {
-	ft := &fakeTurn{outs: []string{"NEXT: +45m\nNOTE: nudge to get ready, ~45m before class"}}
+	ft := &fakeTurn{outs: []string{
+		"WHO: me\nTASK: get ready for class at 6",
+		"NEXT: +45m\nNOTE: nudge to get ready, ~45m before class",
+	}}
 	d, _, st := newTestComp(t, ft.run)
 	owner := Requester{Transport: "telegram", Handle: "@owner", Address: "7", Name: "you", Owner: true}
 
@@ -87,6 +90,47 @@ func TestRegistrationPlansLeadTime(t *testing.T) {
 	}
 	if r.CarryOver == "" {
 		t.Fatal("carry_over from the plan not stored")
+	}
+}
+
+// The agent interprets a natural-language request, so an incidental "to" in the
+// task ("has to come") is no longer mistaken for the who/task separator — the
+// exact phrasing that used to fail with `named "Zouriel that he has"`.
+func TestInterpretsNaturalLanguage(t *testing.T) {
+	ft := &fakeTurn{outs: []string{
+		"WHO: Zouriel\nTASK: come pick me up at 11:45",
+		"NEXT: NOW\nNOTE: pickup at 11:45",
+	}}
+	d, fc, st := newTestComp(t, ft.run)
+	fc.contacts = []client.Contact{{ID: 3, Name: "Zouriel", Telegram: "@zouriel"}}
+	owner := Requester{Transport: "telegram", Handle: "@owner", Address: "1", Name: "Kuri", Owner: true}
+
+	got := d.createReply(owner, "Remind Zouriel that he has to come pick me up at 1145")
+	if !strings.HasPrefix(got, "✅") {
+		t.Fatalf("expected success, got %q", got)
+	}
+	rs, _ := st.ActiveReminders()
+	if len(rs) != 1 {
+		t.Fatalf("want 1 reminder, got %d", len(rs))
+	}
+	if rs[0].RecipientName != "Zouriel" || rs[0].Task != "come pick me up at 11:45" {
+		t.Fatalf("row: %+v", rs[0])
+	}
+}
+
+// With no agent backend (turn is nil), registration still works via the regex
+// fallback, so the command never hard-depends on the model being reachable.
+func TestInterpretFallsBackWithoutBackend(t *testing.T) {
+	d, fc, st := newTestComp(t, nil)
+	fc.contacts = []client.Contact{{ID: 3, Name: "Zouriel", Telegram: "@zouriel"}}
+	owner := Requester{Transport: "telegram", Handle: "@owner", Address: "1", Name: "Kuri", Owner: true}
+
+	if got := d.createReply(owner, "remind Zouriel to call back"); !strings.HasPrefix(got, "✅") {
+		t.Fatalf("fallback create failed: %q", got)
+	}
+	rs, _ := st.ActiveReminders()
+	if len(rs) != 1 || rs[0].Task != "call back" {
+		t.Fatalf("rows: %+v", rs)
 	}
 }
 
