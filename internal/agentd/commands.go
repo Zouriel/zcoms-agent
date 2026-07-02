@@ -28,6 +28,8 @@ func (a *Agent) dispatch(text string) (string, error) {
 		return a.Errands.HandleCommand(text), nil
 	case "remind", "reminder", "reminders":
 		return a.Reminders.HandleCommand(a.ownerRequester(), text), nil
+	case "events", "agenda":
+		return a.eventsCmd(rest)
 	case "agent":
 		if len(rest) == 0 {
 			return "", fmt.Errorf("usage: agent workspace|session|persona|allowlist <…>")
