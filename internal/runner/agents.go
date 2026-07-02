@@ -19,7 +19,7 @@ const agentsFile = "agents.json"
 
 // SessionTypes are the agents.json task keys, one per kind of agent session, so
 // each can run a different backend (`zc agents set <type> <claude|codex>`).
-var SessionTypes = []string{"bridge", "triage", "errands", "reminders"}
+var SessionTypes = []string{"bridge", "triage", "errands", "reminders", "morning"}
 
 // IsSessionType reports whether s is a known session type.
 func IsSessionType(s string) bool {

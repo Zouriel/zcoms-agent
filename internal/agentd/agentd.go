@@ -18,6 +18,7 @@ import (
 	"github.com/Zouriel/zcoms-agent/internal/bootstrap"
 	"github.com/Zouriel/zcoms-agent/internal/bridge"
 	"github.com/Zouriel/zcoms-agent/internal/errands"
+	"github.com/Zouriel/zcoms-agent/internal/morning"
 	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/reminders"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
@@ -39,6 +40,7 @@ type Agent struct {
 	Bridge    *bridge.Comp
 	Errands   *errands.Comp
 	Reminders *reminders.Comp
+	Morning   *morning.Comp
 
 	settings runner.Settings
 	log      *log.Logger
@@ -136,6 +138,12 @@ func (a *Agent) buildRuntimes() error {
 	a.Reminders = reminders.New(a.Client, a.Store, settings.MainUser, mainChat, seedFn,
 		reminders.NewAgentTurn(remBackend))
 
+	// The morning agent runs one daily briefing, resolving its backend live from
+	// the Morning persona just like reminders.
+	morningBackend := func() runner.Backend { return morning.LiveBackend(a.Store) }
+	a.Morning = morning.New(a.Client, a.Store, settings.MainUser, mainChat, seedFn,
+		morning.NewAgentTurn(morningBackend))
+
 	a.Bridge = bridge.New(bridge.Deps{
 		Client: a.Client, WAEnabled: settings.WhatsApp.Enabled,
 		Locations: locs, Allow: allow, Agents: agents, Settings: settings, MainChatID: mainChat,
@@ -168,6 +176,11 @@ func (a *Agent) registerJobs() {
 	// for due rows (like triage) — so a reminder that came due during downtime
 	// fires on the first tick after a restart, with no in-memory state to rebuild.
 	a.Sched.Interval("reminders-tick", 30*time.Second, a.Reminders.FireDue)
+	// The morning briefing fires once a day around 6am local (guard persisted, so a
+	// machine that was off at 6 still fires on first wake). Fire checks the live
+	// enable/disable setting and spawns the session in its own goroutine, so a
+	// briefing parked on the owner's reply never blocks the scheduler tick.
+	a.Sched.DailyAt("morning-briefing", 6, 0, time.Local, a.Morning.Fire)
 	a.Sched.Interval("workspace-discovery", 10*time.Minute, func() { _, _ = a.Registry.Sync() })
 }
 
@@ -354,6 +367,10 @@ func (a *Agent) subscribe(ctx context.Context) {
 					a.Reminders.FeedWhatsApp(ev.Address, ev.MsgRef, ev.Text)
 					return
 				}
+				if a.Morning.OwnsWA(ev.Address) {
+					a.Morning.FeedWhatsApp(ev.Address, ev.MsgRef, ev.Text)
+					return
+				}
 				a.Bridge.HandleEvent(ev)
 			default: // telegram (Instagram joins the bridge path later)
 				if a.Errands.Owns(ev.ChatID) {
@@ -362,6 +379,10 @@ func (a *Agent) subscribe(ctx context.Context) {
 				}
 				if a.Reminders.Owns(ev.ChatID) {
 					a.Reminders.FeedTelegram(ev.ChatID, ev.MessageID, ev.Text)
+					return
+				}
+				if a.Morning.Owns(ev.ChatID) {
+					a.Morning.FeedTelegram(ev.ChatID, ev.MessageID, ev.Text)
 					return
 				}
 				a.Bridge.HandleEvent(ev)

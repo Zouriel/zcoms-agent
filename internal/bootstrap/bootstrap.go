@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Zouriel/zcoms-agent/internal/morning"
 	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
@@ -27,6 +28,14 @@ func Run(s *store.Store) error {
 	// default; edited rows are left untouched. Runs every start (idempotent).
 	if err := personas.UpgradeDefaults(s); err != nil {
 		return err
+	}
+	// Materialize the morning-agent toggle as a real settings row on first sight so
+	// it shows up in the console settings page (defaults to on). Only seeds when
+	// absent, so a later on/off choice is preserved.
+	if v, _ := s.GetSetting(morning.KeyEnabled); v == "" {
+		if err := s.SetSetting(store.Owner, morning.KeyEnabled, "true"); err != nil {
+			return err
+		}
 	}
 	if done, _ := s.GetSetting(migratedKey); done == "1" {
 		return nil
