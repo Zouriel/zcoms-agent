@@ -21,6 +21,7 @@ import (
 	"github.com/Zouriel/zcoms-agent/internal/morning"
 	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/reminders"
+	"github.com/Zouriel/zcoms-agent/internal/reschedule"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/sessions"
 	"github.com/Zouriel/zcoms-agent/internal/store"
@@ -32,15 +33,16 @@ import (
 
 // Agent is the unified runtime.
 type Agent struct {
-	Store     *store.Store
-	Registry  *workspaces.Registry
-	Sessions  *sessions.Manager
-	Sched     *scheduler.Scheduler
-	Client    *client.Client
-	Bridge    *bridge.Comp
-	Errands   *errands.Comp
-	Reminders *reminders.Comp
-	Morning   *morning.Comp
+	Store      *store.Store
+	Registry   *workspaces.Registry
+	Sessions   *sessions.Manager
+	Sched      *scheduler.Scheduler
+	Client     *client.Client
+	Bridge     *bridge.Comp
+	Errands    *errands.Comp
+	Reminders  *reminders.Comp
+	Morning    *morning.Comp
+	Reschedule *reschedule.Comp
 
 	settings runner.Settings
 	log      *log.Logger
@@ -143,6 +145,12 @@ func (a *Agent) buildRuntimes() error {
 	morningBackend := func() runner.Backend { return morning.LiveBackend(a.Store) }
 	a.Morning = morning.New(a.Client, a.Store, settings.MainUser, mainChat, seedFn,
 		morning.NewAgentTurn(morningBackend))
+
+	// The reschedule negotiator reaches out to an event's other party on the
+	// owner's behalf; backend resolves live from the Reschedule persona.
+	rescheduleBackend := func() runner.Backend { return reschedule.LiveBackend(a.Store) }
+	a.Reschedule = reschedule.New(a.Client, a.Store, mainChat, seedFn,
+		reschedule.NewAgentTurn(rescheduleBackend))
 
 	a.Bridge = bridge.New(bridge.Deps{
 		Client: a.Client, WAEnabled: settings.WhatsApp.Enabled,
@@ -371,6 +379,10 @@ func (a *Agent) subscribe(ctx context.Context) {
 					a.Morning.FeedWhatsApp(ev.Address, ev.MsgRef, ev.Text)
 					return
 				}
+				if a.Reschedule.OwnsWA(ev.Address) {
+					a.Reschedule.FeedWhatsApp(ev.Address, ev.MsgRef, ev.Text)
+					return
+				}
 				a.Bridge.HandleEvent(ev)
 			default: // telegram (Instagram joins the bridge path later)
 				if a.Errands.Owns(ev.ChatID) {
@@ -383,6 +395,10 @@ func (a *Agent) subscribe(ctx context.Context) {
 				}
 				if a.Morning.Owns(ev.ChatID) {
 					a.Morning.FeedTelegram(ev.ChatID, ev.MessageID, ev.Text)
+					return
+				}
+				if a.Reschedule.Owns(ev.ChatID) {
+					a.Reschedule.FeedTelegram(ev.ChatID, ev.MessageID, ev.Text)
 					return
 				}
 				a.Bridge.HandleEvent(ev)

@@ -31,6 +31,8 @@ func (a *Agent) dispatch(text string) (string, error) {
 		return a.Reminders.HandleCommand(a.ownerRequester(), text), nil
 	case "events", "agenda":
 		return a.eventsCmd(rest)
+	case "reschedule":
+		return a.rescheduleCmd(rest)
 	case "agent":
 		if len(rest) == 0 {
 			return "", fmt.Errorf("usage: agent workspace|session|persona|allowlist <…>")
