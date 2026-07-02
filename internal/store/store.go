@@ -163,10 +163,16 @@ CREATE TABLE IF NOT EXISTS reminder_events (
 );`); err != nil {
 		return err
 	}
-	// The agent-driven refactor: a reminder carries a free-text note ("carry_over")
-	// the per-run agent rewrites each time, plus a run counter (safety cap). Added
-	// to the existing table idempotently.
-	for _, col := range []string{"carry_over TEXT", "runs INTEGER NOT NULL DEFAULT 0"} {
+	// Columns added to the reminders table after its first cut, applied
+	// idempotently so existing databases pick them up on open:
+	//   - carry_over / runs: the agent-driven refactor (free-text note + run cap).
+	//   - event_start / event_end / other_party: the optional from/to event window
+	//     and an extra involved party. Nullable, persist-only (nothing in the run
+	//     loop reads them; the console and other modules store and show them).
+	for _, col := range []string{
+		"carry_over TEXT", "runs INTEGER NOT NULL DEFAULT 0",
+		"event_start TEXT", "event_end TEXT", "other_party TEXT",
+	} {
 		if _, err := s.db.Exec(`ALTER TABLE reminders ADD COLUMN ` + col); err != nil &&
 			!strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
 			return err

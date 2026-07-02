@@ -65,3 +65,48 @@ func TestReminderCRUD(t *testing.T) {
 		t.Fatalf("cancelled still active: %v", active)
 	}
 }
+
+// The optional event window (from/to) and other-party fields are nullable and
+// round-trip through create, update, and read.
+func TestReminderEventWindow(t *testing.T) {
+	s := openTmpStore(t)
+	start := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
+	end := time.Now().Add(3 * time.Hour).UTC().Format(time.RFC3339)
+
+	// Omitting them leaves empty strings (SQL NULL), not an error.
+	bare, err := s.CreateReminder(Reminder{
+		FromAddr: "telegram|@me", RecipientTransport: "telegram", RecipientAddr: "1",
+		Task: "no window", State: ReminderActive,
+	})
+	if err != nil {
+		t.Fatalf("create bare: %v", err)
+	}
+	if got, _, _ := s.GetReminder(bare.ID); got.EventStart != "" || got.EventEnd != "" || got.OtherParty != "" {
+		t.Fatalf("bare reminder should have empty window fields: %+v", got)
+	}
+
+	// Set on create.
+	r, err := s.CreateReminder(Reminder{
+		FromAddr: "telegram|@me", RecipientTransport: "telegram", RecipientAddr: "2",
+		Task: "dinner", State: ReminderActive,
+		EventStart: start, EventEnd: end, OtherParty: "Reinielle",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, _, _ := s.GetReminder(r.ID)
+	if got.EventStart != start || got.EventEnd != end || got.OtherParty != "Reinielle" {
+		t.Fatalf("event fields not persisted on create: %+v", got)
+	}
+
+	// Change on update.
+	got.EventEnd = time.Now().Add(4 * time.Hour).UTC().Format(time.RFC3339)
+	got.OtherParty = "the caterer"
+	if err := s.UpdateReminder(got); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	back, _, _ := s.GetReminder(r.ID)
+	if back.EventEnd != got.EventEnd || back.OtherParty != "the caterer" {
+		t.Fatalf("event fields not persisted on update: %+v", back)
+	}
+}

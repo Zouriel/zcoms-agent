@@ -23,12 +23,20 @@ type Reminder struct {
 	RecipientName      string `json:"recipient_name,omitempty"`
 	RecipientContactID int64  `json:"recipient_contact_id,omitempty"`
 	Task               string `json:"task"`
-	CarryOver          string `json:"carry_over,omitempty"`
-	NextAt             string `json:"next_at,omitempty"` // RFC3339
-	State              string `json:"state"`             // active | done | cancelled
-	Runs               int    `json:"runs"`
-	CreatedAt          string `json:"created_at,omitempty"`
-	UpdatedAt          string `json:"updated_at,omitempty"`
+	// EventStart and EventEnd optionally record the from/to window of the event
+	// this reminder is about (RFC3339). OtherParty is an optional free-text label
+	// for another person involved in the event, beyond the setter and recipient.
+	// All three are nullable and persist-only: nothing in the reminder run loop
+	// reads them, they exist for the console and other modules to store and show.
+	EventStart string `json:"event_start,omitempty"`
+	EventEnd   string `json:"event_end,omitempty"`
+	OtherParty string `json:"other_party,omitempty"`
+	CarryOver  string `json:"carry_over,omitempty"`
+	NextAt     string `json:"next_at,omitempty"` // RFC3339
+	State      string `json:"state"`             // active | done | cancelled
+	Runs       int    `json:"runs"`
+	CreatedAt  string `json:"created_at,omitempty"`
+	UpdatedAt  string `json:"updated_at,omitempty"`
 }
 
 const (
@@ -40,13 +48,15 @@ const (
 const reminderCols = `id, requester_addr, COALESCE(requester_name,''),
 	target_transport, target_addr, COALESCE(target_name,''), target_contact_id,
 	task_text, COALESCE(carry_over,''), COALESCE(next_at,''), state, runs,
-	COALESCE(created_at,''), COALESCE(updated_at,'')`
+	COALESCE(created_at,''), COALESCE(updated_at,''),
+	COALESCE(event_start,''), COALESCE(event_end,''), COALESCE(other_party,'')`
 
 func scanReminder(sc interface{ Scan(...any) error }) (Reminder, error) {
 	var r Reminder
 	err := sc.Scan(&r.ID, &r.FromAddr, &r.FromName,
 		&r.RecipientTransport, &r.RecipientAddr, &r.RecipientName, &r.RecipientContactID,
-		&r.Task, &r.CarryOver, &r.NextAt, &r.State, &r.Runs, &r.CreatedAt, &r.UpdatedAt)
+		&r.Task, &r.CarryOver, &r.NextAt, &r.State, &r.Runs, &r.CreatedAt, &r.UpdatedAt,
+		&r.EventStart, &r.EventEnd, &r.OtherParty)
 	return r, err
 }
 
@@ -83,11 +93,12 @@ func (s *Store) CreateReminder(r Reminder) (Reminder, error) {
 	res, err := s.db.Exec(
 		`INSERT INTO reminders(requester_addr, requester_name, target_transport, target_addr,
 			target_name, target_contact_id, task_text, carry_over, next_at, state, runs,
-			created_at, updated_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			created_at, updated_at, event_start, event_end, other_party)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.FromAddr, nullable(r.FromName), r.RecipientTransport, r.RecipientAddr,
 		nullable(r.RecipientName), r.RecipientContactID, r.Task, nullable(r.CarryOver),
 		nullable(r.NextAt), r.State, r.Runs, r.CreatedAt, r.UpdatedAt,
+		nullable(r.EventStart), nullable(r.EventEnd), nullable(r.OtherParty),
 	)
 	if err != nil {
 		return r, err
@@ -101,8 +112,10 @@ func (s *Store) CreateReminder(r Reminder) (Reminder, error) {
 func (s *Store) UpdateReminder(r Reminder) error {
 	r.UpdatedAt = now()
 	res, err := s.db.Exec(
-		`UPDATE reminders SET carry_over=?, next_at=?, state=?, runs=?, updated_at=? WHERE id=?`,
-		nullable(r.CarryOver), nullable(r.NextAt), r.State, r.Runs, r.UpdatedAt, r.ID,
+		`UPDATE reminders SET carry_over=?, next_at=?, state=?, runs=?, updated_at=?,
+			event_start=?, event_end=?, other_party=? WHERE id=?`,
+		nullable(r.CarryOver), nullable(r.NextAt), r.State, r.Runs, r.UpdatedAt,
+		nullable(r.EventStart), nullable(r.EventEnd), nullable(r.OtherParty), r.ID,
 	)
 	if err != nil {
 		return err
