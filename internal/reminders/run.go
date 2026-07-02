@@ -5,13 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
+	"github.com/Zouriel/zcoms-agent/internal/timeexpr"
 )
 
 // NewAgentTurn builds the real reminder-agent turn: one RunAgent call on the live
@@ -55,7 +55,7 @@ func (d *Comp) planFirst(r store.Reminder, now time.Time) (time.Time, string) {
 	if nx == "" || strings.EqualFold(nx, "now") {
 		return now, note
 	}
-	if t, err := parseWhen(nx, now); err == nil {
+	if t, err := timeexpr.Parse(nx, now); err == nil {
 		return t, note
 	}
 	return now, note
@@ -74,7 +74,7 @@ func firstPlanPrompt(r store.Reminder, now time.Time) string {
 		"",
 		"Think about lead time. If this is a 'get ready for / leave for / head to / be at' task tied to a time, reach out WELL BEFORE that time so there is time to actually do it (getting ready often needs 30 to 45 minutes; travel needs the travel time). If they named a time (\"in 20 minutes\", \"at 6\"), honour it, adding lead if it is preparation. If it is open-ended, pick a sensible first moment.",
 		"Reply EXACTLY in these two lines and nothing else:",
-		"NEXT: when to first reach out. NOW to reach out right away, or a relative time like +45m, +2h or +1d, or an absolute local time like 2026-07-01T17:15.",
+		"NEXT: when to first reach out. NOW to reach out right away, or a relative time like +45m, +2h, +1d, +2w or +2mo, or an absolute local time like 2026-07-01T17:15.",
 		"NOTE: a short note to your future self (the event time, the lead you are giving, what the first message should do).",
 	}, "\n")
 }
@@ -125,13 +125,18 @@ func (d *Comp) runReminder(r store.Reminder) {
 	}()
 
 	cfg := d.cfg()
-	if r.Runs >= cfg.MaxRuns { // safety backstop: never pester forever
+	// r.Runs counts nudges actually delivered since the recipient last replied,
+	// not total wake-ups. The cap is a runaway backstop: it stops a reminder that
+	// keeps pestering an unresponsive recipient, while a genuinely recurring one
+	// (whose recipient engages, or that only ever quietly reschedules) runs as
+	// long as it needs. So quiet planning runs cost nothing and a reply resets the
+	// count (both handled below), and the cap no longer kills long-lived reminders.
+	if r.Runs >= cfg.MaxRuns {
 		r.State, r.NextAt = store.ReminderDone, ""
-		d.store.AddReminderEvent(r.ID, "done", "hit the run cap")
+		d.store.AddReminderEvent(r.ID, "done", "hit the nudge cap without a reply")
 		d.save(r)
 		return
 	}
-	r.Runs++
 	d.store.AddReminderEvent(r.ID, "run", "")
 
 	seed := ""
@@ -151,10 +156,11 @@ func (d *Comp) runReminder(r store.Reminder) {
 	send := strings.TrimSpace(f1["send"])
 
 	if send == "" || strings.EqualFold(send, "none") {
-		d.apply(r, f1["next"], f1["note"]) // pure planning run: just (re)schedule
+		d.apply(r, f1["next"], f1["note"]) // pure planning run: just (re)schedule, no nudge spent
 		return
 	}
 
+	r.Runs++ // a nudge is going out: only delivered nudges count toward the cap
 	if err := d.sendTo(r.RecipientTransport, r.RecipientAddr, send); err != nil {
 		d.log.Printf("run #%d send: %v", r.ID, err)
 	}
@@ -166,6 +172,9 @@ func (d *Comp) runReminder(r store.Reminder) {
 	}
 	rep, got := d.waitReply(r, wait)
 	d.store.AddReminderEvent(r.ID, "reply", reportReply(rep, got))
+	if got {
+		r.Runs = 0 // they engaged, so this isn't a runaway: reset the nudge count
+	}
 
 	// Turn 2: react to the reply (or the silence) and decide the outcome.
 	t2, _, err := d.turn(withSeed(seed, reactPrompt(r, rep, got, wait)), sess)
@@ -308,7 +317,7 @@ func planPrompt(r store.Reminder, now time.Time) string {
 		from = "the owner"
 	}
 	return strings.Join([]string{
-		fmt.Sprintf("You are handling reminder #%d (run %d).", r.ID, r.Runs),
+		fmt.Sprintf("You are handling reminder #%d (%d nudge(s) sent since their last reply).", r.ID, r.Runs),
 		"Task to get done: " + quote(r.Task),
 		"Set by: " + from + ".",
 		"You are reminding: " + recipientLabel(r) + ".",
@@ -318,7 +327,7 @@ func planPrompt(r store.Reminder, now time.Time) string {
 		"Decide what to do right now. You can send a message now, or send nothing yet and just pick a later time to act (for example it is too early and you only want to nudge closer to the moment).",
 		"Reply EXACTLY in these three lines and nothing else:",
 		"SEND: the message to send now, in a warm, natural, human voice. Never use em-dashes. Or write the single word NONE to stay quiet for now.",
-		"NEXT: when to run again. A relative time like +30m, +2h or +1d, or an absolute local time like 2026-07-01T17:30, or DONE if the task is already finished, or CANCEL to stop reminding.",
+		"NEXT: when to run again. A relative time like +30m, +2h, +1d, +2w or +2mo, or an absolute local time like 2026-07-01T17:30, or DONE if the task is already finished, or CANCEL to stop reminding.",
 		"NOTE: a short note to your future self for the next run (what is going on, what you are waiting for, what to do next).",
 	}, "\n")
 }
@@ -334,7 +343,7 @@ func reactPrompt(r store.Reminder, rep string, got bool, wait time.Duration) str
 		"",
 		"Decide the outcome now. Reply EXACTLY in these three lines and nothing else:",
 		"REPLY: an optional short message to send back now, warm and human, never using em-dashes. Or NONE.",
-		"NEXT: when to run again (relative like +1h or absolute), or DONE if the task is complete or they made it, or CANCEL to stop reminding.",
+		"NEXT: when to run again (relative like +1h, +1d or +2w, or absolute), or DONE if the task is complete or they made it, or CANCEL to stop reminding.",
 		"NOTE: an updated note to your future self for the next run.",
 	}, "\n")
 }
@@ -363,48 +372,12 @@ func parseNext(s string, now time.Time) (string, time.Time) {
 	case "CANCEL", "CANCELLED", "STOP":
 		return store.ReminderCancelled, time.Time{}
 	}
-	if t, err := parseWhen(s, now); err == nil {
+	if t, err := timeexpr.Parse(s, now); err == nil {
 		return store.ReminderActive, t
 	}
-	// Unparseable: keep it alive but don't hammer — try again in an hour.
+	// Unparseable (or a time in the past, which timeexpr rejects): keep it alive
+	// but don't hammer or fire immediately — try again in an hour.
 	return store.ReminderActive, now.Add(time.Hour)
-}
-
-var dayRe = regexp.MustCompile(`(?i)^\+?\s*(\d+)\s*d(ays?)?$`)
-
-// parseWhen turns the agent's time expression into an absolute instant: a relative
-// duration (+30m, +2h, +1d, 90m), an absolute local timestamp, or a wall-clock time.
-func parseWhen(s string, now time.Time) (time.Time, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}, fmt.Errorf("empty")
-	}
-	if m := dayRe.FindStringSubmatch(s); m != nil {
-		n, _ := strconv.Atoi(m[1])
-		return now.AddDate(0, 0, n), nil
-	}
-	if dur, err := time.ParseDuration(strings.TrimPrefix(s, "+")); err == nil {
-		if dur < 0 {
-			return time.Time{}, fmt.Errorf("past")
-		}
-		return now.Add(dur), nil
-	}
-	loc := now.Location()
-	for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02T15:04", "2006-01-02 15:04:05", "2006-01-02 15:04"} {
-		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
-			return t, nil
-		}
-	}
-	for _, layout := range []string{"15:04", "3:04PM", "3:04 PM"} {
-		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
-			res := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, loc)
-			if !res.After(now) {
-				res = res.AddDate(0, 0, 1)
-			}
-			return res, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("couldn't parse time %q", s)
 }
 
 // --- small helpers -----------------------------------------------------------

@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Zouriel/zcoms-agent/internal/timeexpr"
 )
 
 // A scheduled errand is an errand the owner asked to be dispatched at a specific
@@ -172,58 +174,13 @@ target:
 	return spec, runAt, nil
 }
 
-// parseWhen turns a human time expression into an absolute instant, relative to
-// now. It accepts a relative duration (+30m, 90m, 1h30m), a wall-clock time
-// today/tomorrow (15:30), or a full local timestamp (2026-06-18T15:30,
-// 2026-06-18 15:30, optionally with seconds). Absolute times are read in the
-// machine's local zone; an absolute time already in the past is rejected.
+// parseWhen turns a human time expression into an absolute instant relative to
+// now. It delegates to the shared timeexpr parser, so an errand accepts the same
+// syntax as a reminder: a relative duration (+30m, 1h30m), a relative calendar
+// offset (+2d, +3w, +2mo), a wall-clock time (15:30), or a full local timestamp
+// (2026-09-01T09:00). A time already in the past is rejected.
 func parseWhen(s string, now time.Time) (time.Time, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}, fmt.Errorf("no time given")
-	}
-	if strings.EqualFold(s, "now") {
-		return now, nil
-	}
-
-	// Relative duration: "+30m" or a bare "30m" / "1h30m".
-	dur := strings.TrimPrefix(s, "+")
-	if d, err := time.ParseDuration(dur); err == nil {
-		if d < 0 {
-			return time.Time{}, fmt.Errorf("a scheduled time can't be in the past (%q)", s)
-		}
-		return now.Add(d), nil
-	}
-
-	loc := now.Location()
-
-	// Full local timestamps.
-	for _, layout := range []string{
-		"2006-01-02T15:04:05",
-		"2006-01-02T15:04",
-		"2006-01-02 15:04:05",
-		"2006-01-02 15:04",
-	} {
-		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
-			if t.Before(now) {
-				return time.Time{}, fmt.Errorf("%s is in the past", t.Format("Mon 02 Jan 15:04"))
-			}
-			return t, nil
-		}
-	}
-
-	// Wall-clock time only: today if still ahead, else tomorrow.
-	for _, layout := range []string{"15:04", "15:04:05"} {
-		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
-			res := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), t.Second(), 0, loc)
-			if !res.After(now) {
-				res = res.AddDate(0, 0, 1)
-			}
-			return res, nil
-		}
-	}
-
-	return time.Time{}, fmt.Errorf("couldn't understand the time %q — try +30m, 15:30, or 2026-06-18T15:30", s)
+	return timeexpr.Parse(s, now)
 }
 
 // humanDuration renders a duration as a compact "1d 2h 3m" (minute resolution),

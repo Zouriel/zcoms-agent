@@ -43,8 +43,51 @@ func TestPlanningRun(t *testing.T) {
 	if err != nil || !at.After(time.Now()) {
 		t.Fatalf("next_at not future: %q", got.NextAt)
 	}
-	if got.Runs != 1 {
-		t.Fatalf("runs = %d", got.Runs)
+	// A quiet planning run sends no nudge, so it must not spend against the cap.
+	if got.Runs != 0 {
+		t.Fatalf("quiet run spent a nudge: runs = %d", got.Runs)
+	}
+}
+
+// The nudge cap counts only delivered nudges and resets when the recipient
+// replies, so a reminder that keeps getting engagement is never killed by it,
+// while one that pesters an unresponsive recipient eventually stops.
+func TestNudgeCapCountsAndResets(t *testing.T) {
+	// A nudge that gets a reply: Runs is bumped for the send, then reset to 0.
+	ft := &fakeTurn{outs: []string{
+		"SEND: gym at 8, get moving\nNEXT: +1h\nNOTE: nudged",
+		"REPLY: NONE\nNEXT: +1d\nNOTE: recurring, check tomorrow",
+	}}
+	d, _, st := newTestComp(t, ft.run)
+	d.replyWaitOverride = 2 * time.Second
+	r := newReminder(t, st, "500", 0)
+	r.Runs = 5 // pretend it had nudged a few times already
+	d.save(r)
+
+	done := make(chan struct{})
+	go func() { d.runReminder(reload(t, st, r.ID)); close(done) }()
+	waitForOwn(t, d, 500, true)
+	if !d.FeedTelegram(500, 1, "on it") {
+		t.Fatal("reply not consumed")
+	}
+	<-done
+
+	if got := reload(t, st, r.ID); got.Runs != 0 {
+		t.Fatalf("a reply should reset the nudge count, got runs = %d", got.Runs)
+	}
+
+	// At the cap with no reply in sight, the reminder gives up rather than pester on.
+	ft2 := &fakeTurn{outs: []string{"SEND: still waiting\nNEXT: +1h\nNOTE: x"}}
+	d2, fc2, st2 := newTestComp(t, ft2.run)
+	capped := newReminder(t, st2, "600", 0)
+	capped.Runs = d2.cfg().MaxRuns
+	d2.save(capped)
+	d2.runReminder(reload(t, st2, capped.ID))
+	if got := reload(t, st2, capped.ID); got.State != store.ReminderDone {
+		t.Fatalf("at the cap it should finish, state = %s", got.State)
+	}
+	if len(fc2.sent) != 0 {
+		t.Fatalf("a capped reminder should not send another nudge, got %v", fc2.sent)
 	}
 }
 

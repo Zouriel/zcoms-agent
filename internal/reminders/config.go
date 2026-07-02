@@ -21,9 +21,13 @@ const (
 
 // Config is the live, owner-tunable reminder behaviour.
 type Config struct {
-	Enabled       bool `json:"enabled"`
-	MaxRuns       int  `json:"max_runs"`        // safety cap on total runs per reminder
-	ReplyWaitMins int  `json:"reply_wait_mins"` // how long a run waits for the reply
+	Enabled bool `json:"enabled"`
+	// MaxRuns caps the number of nudges delivered without a reply before a
+	// reminder gives up (a runaway backstop). It counts delivered nudges since the
+	// recipient last replied, not total wake-ups: quiet reschedules are free and a
+	// reply resets the count, so a genuinely long-running reminder is not killed.
+	MaxRuns       int `json:"max_runs"`
+	ReplyWaitMins int `json:"reply_wait_mins"` // how long a run waits for the reply
 }
 
 func DefaultConfig() Config {
