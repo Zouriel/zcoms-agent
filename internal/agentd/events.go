@@ -23,7 +23,7 @@ func (a *Agent) eventsCmd(args []string) (string, error) {
 // the negotiator, is everything after the id, with an optional leading "|").
 func (a *Agent) rescheduleCmd(args []string) (string, error) {
 	if len(args) == 0 {
-		return "", fmt.Errorf("usage: reschedule <event id> | <note>")
+		return "", fmt.Errorf("usage: reschedule <event id> <note>")
 	}
 	id, err := strconv.ParseInt(strings.TrimSpace(args[0]), 10, 64)
 	if err != nil {
