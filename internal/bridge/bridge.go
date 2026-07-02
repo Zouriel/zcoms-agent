@@ -90,6 +90,14 @@ func (d *Comp) handle(st *userState, text string) {
 		return
 	}
 
+	// `events <date-time>` / `agenda <date-time>` — a read-only lookup of the
+	// events around a moment, answered in-process from the reminders store.
+	if strings.HasPrefix(lower, "events ") || strings.HasPrefix(lower, "agenda ") ||
+		lower == "events" || lower == "agenda" {
+		d.handleEventsCommand(st, strings.TrimSpace(text))
+		return
+	}
+
 	// zc-team commands (and any ongoing multi-turn team conversation) are
 	// forwarded to the team component, which holds the conversation state.
 	if st.teamSession || isTeamCommand(lower) {
@@ -528,6 +536,8 @@ func (d *Comp) helpText(st *userState) string {
 		"  new — start a fresh session here",
 		"  status — show current location/session",
 		"  end — detach from the current session",
+		"  remind <who> to <task> — set a reminder (also: remind list · remind cancel <id>)",
+		"  events <date-time> — what's on within 2h of a time (a bare date lists the whole day)",
 		"  interact triage — talk to the triage agent (same memory) & reply to people",
 		"  chat — full general-purpose assistant (files, shell, SSH) in your home dir",
 		"  triage reset — wipe the triage agent's memory (fresh session next pass)",

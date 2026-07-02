@@ -1,4 +1,4 @@
-package agentd
+package reminders
 
 import (
 	"strings"
@@ -7,8 +7,6 @@ import (
 
 	"github.com/Zouriel/zcoms-agent/internal/store"
 )
-
-func rfc(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
 func TestParseAnchor(t *testing.T) {
 	now := time.Date(2026, 7, 3, 10, 0, 0, 0, time.Local)

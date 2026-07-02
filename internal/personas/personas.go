@@ -64,6 +64,11 @@ var defaultBridgeSeed = strings.Join([]string{
 	"    (list what's queued) / `zc errand unschedule <id>`. Use this rather than sleeping or telling the",
 	"    owner you'll \"remember\" — once scheduled it runs on its own.",
 	"",
+	"",
+	"EVENTS & REMINDERS — the owner's events live as reminders (each can carry a start/end window and",
+	"an other-party). To see what's on around a moment, run `zc agent events <date-time>` (events within",
+	"two hours either side; a bare date lists the whole day). To set one, `zc agent remind <who> to <task>`.",
+	"",
 	"COMMERCE — the owner runs zcoms-commerce, a hosted Telegram-Stars commerce platform: merchants bring",
 	"a bot token and zcoms hosts it on a VPS runtime (merchant bots, Stars payments, delivery,",
 	"subscriptions, refunds, per-store billing). Inspect and drive it with the `zc commerce` CLI:",
@@ -154,6 +159,14 @@ func SeedOr(s *store.Store, key string) string {
 		return d.seed
 	}
 	return ""
+}
+
+// Default returns a persona's compiled default display name and seed, so the
+// owner can reset a row to the shipped scaffold (e.g. after a seed update, since
+// existing rows are never auto-overwritten). ok is false for an unknown key.
+func Default(key string) (display, seed string, ok bool) {
+	d, ok := defaultSeed[key]
+	return d.display, d.seed, ok
 }
 
 // SeedDefaults inserts any missing default persona on first run (owner action).

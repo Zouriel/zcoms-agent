@@ -8,6 +8,7 @@ import (
 
 	"github.com/Zouriel/zcoms-agent/internal/bridge"
 	"github.com/Zouriel/zcoms-agent/internal/morning"
+	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/reminders"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
@@ -312,8 +313,29 @@ func (a *Agent) personaCmd(args []string) (string, error) {
 			return "", fmt.Errorf("field must be backend|model|seed|name")
 		}
 		return "Persona updated.", a.Store.UpdatePersona(store.Owner, key, p)
+	case "reset":
+		// persona reset <key> — restore the seed (and display name) to the compiled
+		// default. Existing rows are never auto-overwritten on a seed update, so this
+		// is how the owner pulls in a new default scaffold.
+		if len(args) < 2 {
+			return "", fmt.Errorf("usage: persona reset <key>")
+		}
+		key := args[1]
+		display, seed, ok := personas.Default(key)
+		if !ok {
+			return "", fmt.Errorf("no compiled default for persona %q", key)
+		}
+		p, ok, err := a.Store.GetPersona(key)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", fmt.Errorf("no persona %q", key)
+		}
+		p.SeedPrompt, p.DisplayName = seed, display
+		return "Persona reset to default.", a.Store.UpdatePersona(store.Owner, key, p)
 	default:
-		return "", fmt.Errorf("usage: persona list|set <key> <field> <value>")
+		return "", fmt.Errorf("usage: persona list|set|reset <key> …")
 	}
 }
 

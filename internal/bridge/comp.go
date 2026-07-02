@@ -173,6 +173,29 @@ func (d *Comp) handleRemindCommand(st *userState, text string) {
 	d.send(st.route(), d.reminders.HandleCommand(d.requesterFor(st), text))
 }
 
+// handleEventsCommand answers `events <date-time>` from an allow-listed user: the
+// events within two hours of the given moment (or a whole day for a bare date),
+// read from the in-process reminders store. The leading verb is stripped so the
+// rest is the time to look around.
+func (d *Comp) handleEventsCommand(st *userState, text string) {
+	if d.reminders == nil {
+		d.send(st.route(), "Events aren't available right now.")
+		return
+	}
+	when := text
+	if i := strings.IndexByte(text, ' '); i >= 0 {
+		when = strings.TrimSpace(text[i+1:])
+	} else {
+		when = "" // bare "events" with no time
+	}
+	reply, err := d.reminders.EventsAround(when, time.Now())
+	if err != nil {
+		d.send(st.route(), "⚠️ "+err.Error())
+		return
+	}
+	d.send(st.route(), reply)
+}
+
 // requesterFor builds the reminder requester identity from a bridge session: the
 // reply address and transport are the session's, and the requester is the owner
 // when their handle matches main_user.
