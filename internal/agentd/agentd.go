@@ -18,6 +18,7 @@ import (
 	"github.com/Zouriel/zcoms-agent/internal/bootstrap"
 	"github.com/Zouriel/zcoms-agent/internal/bridge"
 	"github.com/Zouriel/zcoms-agent/internal/errands"
+	"github.com/Zouriel/zcoms-agent/internal/lineup"
 	"github.com/Zouriel/zcoms-agent/internal/morning"
 	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/reminders"
@@ -43,6 +44,7 @@ type Agent struct {
 	Reminders  *reminders.Comp
 	Morning    *morning.Comp
 	Reschedule *reschedule.Comp
+	Lineup     *lineup.Comp
 
 	settings runner.Settings
 	log      *log.Logger
@@ -151,6 +153,13 @@ func (a *Agent) buildRuntimes() error {
 	rescheduleBackend := func() runner.Backend { return reschedule.LiveBackend(a.Store) }
 	a.Reschedule = reschedule.New(a.Client, a.Store, mainChat, seedFn,
 		reschedule.NewAgentTurn(rescheduleBackend))
+
+	// The lineup is the owner's on-demand schedule assistant: opened with the
+	// "lineup" keyword, it reads/adds/reschedules the owner's own events until they
+	// end it or go quiet. Backend resolves live from the Lineup persona.
+	lineupBackend := func() runner.Backend { return lineup.LiveBackend(a.Store) }
+	a.Lineup = lineup.New(a.Client, a.Store, settings.MainUser, mainChat, seedFn,
+		lineup.NewAgentTurn(lineupBackend))
 
 	a.Bridge = bridge.New(bridge.Deps{
 		Client: a.Client, WAEnabled: settings.WhatsApp.Enabled,
@@ -399,6 +408,11 @@ func (a *Agent) subscribe(ctx context.Context) {
 				}
 				if a.Reschedule.Owns(ev.ChatID) {
 					a.Reschedule.FeedTelegram(ev.ChatID, ev.MessageID, ev.Text)
+					return
+				}
+				// The lineup opens on the owner's "lineup" keyword and, once open,
+				// takes every owner message until they end it or go quiet.
+				if a.Lineup.Trigger(ev.ChatID, ev.MessageID, ev.Text) {
 					return
 				}
 				a.Bridge.HandleEvent(ev)

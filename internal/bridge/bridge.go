@@ -538,6 +538,7 @@ func (d *Comp) helpText(st *userState) string {
 		"  end — detach from the current session",
 		"  remind <who> to <task> — set a reminder (also: remind list · remind cancel <id>)",
 		"  events <date-time> — what's on within 2h of a time (a bare date lists the whole day)",
+		"  lineup <request> — schedule assistant: read your agenda, add or reschedule events (say 'end'/'stop' or go quiet to close)",
 		"  interact triage — talk to the triage agent (same memory) & reply to people",
 		"  chat — full general-purpose assistant (files, shell, SSH) in your home dir",
 		"  triage reset — wipe the triage agent's memory (fresh session next pass)",
