@@ -129,6 +129,29 @@ func TestSplitKeyword(t *testing.T) {
 	}
 }
 
+// The turn prompt hands the model the events near the asked-about time and tells
+// it to flag clashes, so "can I do a date at 6?" with a 7pm event on the calendar
+// gets a gap-aware answer rather than a blind yes.
+func TestPromptIsScheduleAware(t *testing.T) {
+	now := time.Now()
+	sevenPM := time.Date(now.Year(), now.Month(), now.Day(), 19, 0, 0, 0, now.Location())
+	ev := store.Reminder{ID: 42, Task: "standup", EventStart: sevenPM.UTC().Format(time.RFC3339)}
+
+	p := lineupPrompt([]store.Reminder{ev}, nil, "can I go on a date with this girl at 6?", true, now)
+
+	for _, want := range []string{
+		"7:00 PM",                  // the 7pm event is in front of the model
+		"standup",                  // named, so it can reference it
+		"date with this girl at 6", // the owner's actual question
+		"schedule-aware",           // the instruction to check nearby times
+		"tight gap",                // and to warn on a clash / short window
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, p)
+		}
+	}
+}
+
 // A non-owner chat, and an ordinary owner message with no open session, are left
 // for the bridge (Trigger returns false and runs no turn).
 func TestTriggerLeavesOrdinaryTrafficToBridge(t *testing.T) {
