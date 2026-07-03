@@ -160,9 +160,17 @@ func TestNegotiationUpdatesEvent(t *testing.T) {
 	if !strings.Contains(owner, "moved it to") || !strings.Contains(owner, "Sam is happy") {
 		t.Fatalf("owner report missing: %q", owner)
 	}
-	// The event's time actually changed.
-	if got := reload(t, st, ev.ID); got.EventStart == oldStart || got.EventStart == "" {
+	// The event's time actually changed, and the nudge (NextAt) moved with it,
+	// landing a lead before the new start rather than at it (legacy row had no
+	// lead, so the default applies).
+	got := reload(t, st, ev.ID)
+	if got.EventStart == oldStart || got.EventStart == "" {
 		t.Fatalf("event time not updated: was %q now %q", oldStart, got.EventStart)
+	}
+	es, err1 := time.Parse(time.RFC3339, got.EventStart)
+	na, err2 := time.Parse(time.RFC3339, got.NextAt)
+	if err1 != nil || err2 != nil || !na.Before(es) {
+		t.Fatalf("NextAt should land before the new EventStart: start=%q next=%q", got.EventStart, got.NextAt)
 	}
 }
 

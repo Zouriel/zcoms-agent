@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Zouriel/zcoms-agent/internal/eventtime"
 	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/store"
 	"github.com/Zouriel/zcoms-agent/internal/timeexpr"
@@ -239,7 +240,9 @@ func (d *Comp) applyAction(f map[string]string, transport, addr string, now time
 			Task: task, State: store.ReminderActive,
 			EventStart: start, EventEnd: d.parseTimeField(f["end"], now),
 			OtherParty: cleanField(f["other"]),
-			NextAt:     start,
+			// NextAt is the reminder fire time: a lead window before the event so
+			// they can get ready, chosen by the agent (else defaulted).
+			NextAt: eventtime.NextAt(start, f["lead"]),
 		}); err != nil {
 			d.log.Printf("add: %v", err)
 		}
@@ -250,8 +253,15 @@ func (d *Comp) applyAction(f map[string]string, transport, addr string, now time
 			d.log.Printf("move #%d: not found", id)
 			return
 		}
+		oldStart, oldNextAt := rem.EventStart, rem.NextAt
 		if s := d.parseTimeField(f["start"], now); s != "" {
-			rem.EventStart, rem.NextAt = s, s
+			rem.EventStart = s
+			// A fresh lead if the agent gave one, else keep the event's existing lead.
+			if lead := cleanField(f["lead"]); lead != "" {
+				rem.NextAt = eventtime.NextAt(s, lead)
+			} else {
+				rem.NextAt = eventtime.Shift(oldStart, oldNextAt, s)
+			}
 		}
 		if e := d.parseTimeField(f["end"], now); e != "" {
 			rem.EventEnd = e
@@ -325,18 +335,20 @@ func convPrompt(evs []store.Reminder, userMsg string, first bool, now time.Time)
 	lines = append(lines,
 		"",
 		"Available actions (choose ONE per reply):",
-		"- add: create a new event. Fill TASK, and START/END/OTHER when known.",
-		"- move: reschedule an existing event. Fill ID and the new START (and END if given).",
+		"- add: create a new event. Fill TASK, START (the event's own time), LEAD, and END/OTHER when known.",
+		"- move: reschedule an existing event. Fill ID and the new START (and END/LEAD if given).",
 		"- cancel: remove an existing event. Fill ID.",
 		"- none: just talk, change nothing.",
 		"Times may be a clock time (3:30 PM), a relative offset (+2h, +1d), or a full date-time (2026-07-05T09:00). Use - for anything not applicable.",
+		"START is the event's OWN time. LEAD is how long BEFORE it to remind them so they can get ready, judged by the event (a quick call about 15m, something to travel to an hour or more). Default is 30 minutes and it never lands less than 15 minutes before, so the reminder always comes with time to spare, never at the event itself.",
 		"The conversation stays open until the owner says \"end\" themselves, so never try to close it or say goodbye first, just answer this turn and stop.",
 		"",
 		"Reply EXACTLY in these lines and nothing else:",
 		"SAY: your message to send now, warm and human, never using em-dashes",
 		"ACTION: none | add | move | cancel",
 		"TASK: the event, if adding, else -",
-		"START: the start time, if add or move, else -",
+		"START: the event's own time, if add or move, else -",
+		"LEAD: how long before START to remind them (e.g. 30m, 1h), if add or move, else -",
 		"END: the end time, or -",
 		"OTHER: another person involved, or -",
 		"ID: the event id, if move or cancel, else -",

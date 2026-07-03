@@ -107,7 +107,7 @@ func TestSessionStaysOpenUntilEnd(t *testing.T) {
 	ft := &fakeTurn{outs: []string{
 		"SAY: Good morning!",
 		"SAY: Morning! Your day is open so far. Want to add anything?\nACTION: none\nTASK: -\nSTART: -\nEND: -\nOTHER: -\nID: -",
-		"SAY: Done, dentist at 3.\nACTION: add\nTASK: dentist\nSTART: 15:00\nEND: -\nOTHER: Dr Lee\nID: -",
+		"SAY: Done, dentist at 3.\nACTION: add\nTASK: dentist\nSTART: 15:00\nLEAD: 45m\nEND: -\nOTHER: Dr Lee\nID: -",
 	}}
 	d, fc, st := newTestComp(t, ft.run)
 
@@ -146,8 +146,14 @@ func TestSessionStaysOpenUntilEnd(t *testing.T) {
 	if r.Task != "dentist" || r.OtherParty != "Dr Lee" || r.EventStart == "" {
 		t.Fatalf("event not stored as expected: %+v", r)
 	}
-	if _, err := time.Parse(time.RFC3339, r.EventStart); err != nil {
-		t.Fatalf("event_start not RFC3339: %q", r.EventStart)
+	// NextAt (the nudge) must land the LEAD (45m) before EventStart, not at it.
+	es, err1 := time.Parse(time.RFC3339, r.EventStart)
+	na, err2 := time.Parse(time.RFC3339, r.NextAt)
+	if err1 != nil || err2 != nil {
+		t.Fatalf("event_start/next_at not RFC3339: start=%q next=%q", r.EventStart, r.NextAt)
+	}
+	if d := es.Sub(na); d != 45*time.Minute {
+		t.Fatalf("want NextAt 45m before EventStart, got %v (start=%v next=%v)", d, es, na)
 	}
 
 	// Only "end" closes it; the model never got to.

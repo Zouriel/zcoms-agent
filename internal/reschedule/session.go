@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Zouriel/zcoms-agent/internal/eventtime"
 	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
@@ -152,12 +153,14 @@ func (d *Comp) applyNewTime(reminderID int64, newtime string, now time.Time) (la
 	if err != nil || !found || r.State == store.ReminderCancelled {
 		return "", false
 	}
+	oldStart, oldNextAt := r.EventStart, r.NextAt
 	old := parseInstant(r.EventStart)
 	if end := parseInstant(r.EventEnd); !end.IsZero() && !old.IsZero() {
 		r.EventEnd = rfc(end.Add(start.Sub(old)))
 	}
 	r.EventStart = rfc(start)
-	r.NextAt = rfc(start)
+	// Keep the reminder its lead-time before the (new) start, not at it.
+	r.NextAt = eventtime.Shift(oldStart, oldNextAt, rfc(start))
 	if err := d.store.UpdateReminder(r); err != nil {
 		d.log.Printf("apply new time: %v", err)
 		return "", false

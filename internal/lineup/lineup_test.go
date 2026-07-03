@@ -175,7 +175,7 @@ func TestTriggerLeavesOrdinaryTrafficToBridge(t *testing.T) {
 func TestOpensRunsAndEnds(t *testing.T) {
 	ft := &fakeTurn{outs: []string{
 		"SAY: Today's clear so far.\nACTION: none\nTASK: -\nSTART: -\nEND: -\nOTHER: -\nID: -",
-		"SAY: Added, gym at 6pm.\nACTION: add\nTASK: gym\nSTART: 18:00\nEND: -\nOTHER: -\nID: -",
+		"SAY: Added, gym at 6pm.\nACTION: add\nTASK: gym\nSTART: 18:00\nLEAD: 30m\nEND: -\nOTHER: -\nID: -",
 	}}
 	d, fc, st := newTestComp(t, ft.run)
 
@@ -205,6 +205,12 @@ func TestOpensRunsAndEnds(t *testing.T) {
 	}
 	if rs[0].Task != "gym" || rs[0].EventStart == "" {
 		t.Fatalf("event not stored as expected: %+v", rs[0])
+	}
+	// The nudge (NextAt) lands the LEAD (30m) before the event, not at it.
+	es, _ := time.Parse(time.RFC3339, rs[0].EventStart)
+	na, err := time.Parse(time.RFC3339, rs[0].NextAt)
+	if err != nil || es.Sub(na) != 30*time.Minute {
+		t.Fatalf("want NextAt 30m before EventStart, got start=%q next=%q", rs[0].EventStart, rs[0].NextAt)
 	}
 
 	// "end" closes it and runs no model turn.
