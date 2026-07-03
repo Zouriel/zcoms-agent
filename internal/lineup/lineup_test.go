@@ -144,7 +144,8 @@ func TestPromptIsScheduleAware(t *testing.T) {
 		"standup",                  // named, so it can reference it
 		"date with this girl at 6", // the owner's actual question
 		"schedule-aware",           // the instruction to check nearby times
-		"tight gap",                // and to warn on a clash / short window
+		"SAFE MARGIN",              // enforce a buffer between events
+		"30 minutes",               // the default margin size
 	} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, p)
