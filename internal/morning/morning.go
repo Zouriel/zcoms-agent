@@ -1,8 +1,9 @@
 // Package morning is the daily morning agent. Once a day (by default around 6am,
-// gated by a live enable/disable setting) it greets the owner, waits until they
-// actually reply, then walks them through the events they have for that day in a
-// warm human voice and offers to reschedule or add anything. It reads and edits
-// the owner's own reminders (the system's event store) through a controlled,
+// gated by a live enable/disable setting) it greets the owner and then goes
+// dormant. Unlike a parked briefing, it holds no goroutine and no timeout: like
+// the bridge, the session stays open across gaps and every message the owner
+// sends drives one more turn, until they say "end". It reads and edits the
+// owner's own reminders (the system's event store) through a controlled,
 // deterministic path: the model only decides what to say and which structured
 // action to take, the store writes stay in code. All the judgement lives in the
 // agent; the loop just carries it.
@@ -12,7 +13,6 @@ import (
 	"log"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
@@ -32,8 +32,10 @@ type commsClient interface {
 // in for unit tests; nil disables the agent (the session is skipped).
 type AgentTurn func(prompt, resumeID string) (text, sessionID string, err error)
 
-// Comp is the morning-agent runtime. One briefing runs per day, in its own
-// goroutine, parked on the owner's replies via the waiting map.
+// Comp is the morning-agent runtime. A session opens once a day (Fire) and then
+// lives as a plain message-driven conversation: no goroutine is parked on a
+// reply, and nothing times it out. The owner's next message always wakes it
+// again, until they end it.
 type Comp struct {
 	client commsClient
 	store  *store.Store
@@ -44,15 +46,12 @@ type Comp struct {
 	mu        sync.Mutex
 	mainUser  string
 	ownerChat int64
-	waiting   map[string]chan reply // recipient key -> the parked wait
-	active    bool                  // a briefing is in flight (at most one/day)
 
-	// test knobs (0 = use the real defaults).
-	wakeWaitOverride time.Duration
-	convWaitOverride time.Duration
+	active    bool   // a morning session is open (until the owner says end)
+	first     bool   // the next owner reply is the wake/brief turn
+	busy      bool   // a turn (greeting or reply) is in flight
+	sessionID string // resume id threading this morning's turns
 }
-
-type reply struct{ text string }
 
 // New builds the morning runtime. turn may be nil (then Fire is a no-op with a
 // log line, e.g. in a headless test without a backend).
@@ -62,7 +61,6 @@ func New(c commsClient, st *store.Store, mainUser string, ownerChat int64, seed 
 		log:       log.New(log.Writer(), "[morning] ", log.LstdFlags),
 		mainUser:  mainUser,
 		ownerChat: ownerChat,
-		waiting:   map[string]chan reply{},
 	}
 }
 
@@ -73,9 +71,10 @@ func (d *Comp) SetOwner(mainUser string, ownerChat int64) {
 	d.mu.Unlock()
 }
 
-// Fire is the scheduler's daily hook. It runs a briefing when the feature is
-// enabled and one is not already in flight; the actual session runs in its own
-// goroutine so it never blocks the scheduler tick while waiting on a reply.
+// Fire is the scheduler's daily hook. It opens a morning session and sends the
+// greeting, then returns: the session goes dormant and the owner's own replies
+// drive it from there (no parked goroutine, no timeout). At most one session is
+// open at a time.
 func (d *Comp) Fire() {
 	if d.turn == nil {
 		return
@@ -88,15 +87,10 @@ func (d *Comp) Fire() {
 		d.mu.Unlock()
 		return
 	}
-	d.active = true
+	// busy is held across the greeting so an eager reply waits for it to land.
+	d.active, d.first, d.busy, d.sessionID = true, true, true, ""
 	d.mu.Unlock()
-	go d.runSession()
-}
-
-func (d *Comp) releaseSession() {
-	d.mu.Lock()
-	d.active = false
-	d.mu.Unlock()
+	go d.sendGreeting()
 }
 
 // ownerRoute is the transport + reply address for the owner's own chat.
@@ -127,84 +121,35 @@ func (d *Comp) sendTo(transport, addr, text string) {
 	}
 }
 
-// --- reply routing (only while a briefing is parked on a reply) --------------
+// --- reply routing (for the life of an open session) -------------------------
 
-func recipientKey(transport, addr string) string {
-	if transport == "" {
-		transport = "telegram"
-	}
-	return transport + "|" + addr
-}
-
-func (d *Comp) ownsKey(key string) bool {
+// Owns reports whether an open morning session should take this Telegram chat's
+// message. Unlike a parked briefing, it stays true for the whole session (the
+// owner's own chat) until the session ends, so every reply keeps waking it.
+func (d *Comp) Owns(chatID int64) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	_, ok := d.waiting[key]
-	return ok
+	return d.active && d.ownerChat != 0 && chatID == d.ownerChat
 }
 
-// Owns reports whether the briefing is waiting on a Telegram chat's reply.
-func (d *Comp) Owns(chatID int64) bool { return d.ownsKey(recipientKey("telegram", itoa(chatID))) }
+// OwnsWA is always false: the morning briefing runs on the owner's Telegram chat.
+func (d *Comp) OwnsWA(string) bool { return false }
 
-// OwnsWA reports whether the briefing is waiting on a WhatsApp jid's reply.
-func (d *Comp) OwnsWA(jid string) bool { return d.ownsKey(recipientKey("whatsapp", jid)) }
-
-// FeedTelegram routes a Telegram reply into the waiting briefing and marks it
+// FeedTelegram routes an owner reply into the open morning session and marks it
 // read so triage doesn't also surface it. Returns true if consumed.
 func (d *Comp) FeedTelegram(chatID, messageID int64, text string) bool {
-	if d.feed(recipientKey("telegram", itoa(chatID)), text) {
-		if messageID != 0 {
-			_ = d.client.MarkRead(chatID, []int64{messageID})
-		}
-		return true
-	}
-	return false
-}
-
-// FeedWhatsApp routes a WhatsApp reply into the waiting briefing and clears the unread.
-func (d *Comp) FeedWhatsApp(jid, msgRef, text string) bool {
-	if d.feed(recipientKey("whatsapp", jid), text) {
-		if msgRef != "" {
-			_ = d.client.MarkReadOn("whatsapp", jid, []string{msgRef})
-		}
-		return true
-	}
-	return false
-}
-
-func (d *Comp) feed(key, text string) bool {
-	d.mu.Lock()
-	ch := d.waiting[key]
-	d.mu.Unlock()
-	if ch == nil {
+	if !d.Owns(chatID) {
 		return false
 	}
-	select {
-	case ch <- reply{text: text}:
-	default: // a reply is already queued for this turn; drop the extra
+	if messageID != 0 {
+		_ = d.client.MarkRead(chatID, []int64{messageID})
 	}
+	d.handleReply(text)
 	return true
 }
 
-// waitReply parks on the owner's reply up to wait, then gives up.
-func (d *Comp) waitReply(transport, addr string, wait time.Duration) (string, bool) {
-	key := recipientKey(transport, addr)
-	ch := make(chan reply, 1)
-	d.mu.Lock()
-	d.waiting[key] = ch
-	d.mu.Unlock()
-	defer func() {
-		d.mu.Lock()
-		delete(d.waiting, key)
-		d.mu.Unlock()
-	}()
-	select {
-	case rep := <-ch:
-		return rep.text, true
-	case <-time.After(wait):
-		return "", false
-	}
-}
+// FeedWhatsApp is a no-op: the morning session lives on the owner's Telegram chat.
+func (d *Comp) FeedWhatsApp(string, string, string) bool { return false }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 

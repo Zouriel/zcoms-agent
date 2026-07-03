@@ -13,30 +13,9 @@ import (
 	"github.com/Zouriel/zcoms-agent/internal/timeexpr"
 )
 
-const (
-	maxConvTurns    = 12
-	maxWakeNudges   = 2
-	defaultWakeWait = 20 * time.Minute
-	defaultConvWait = 15 * time.Minute
-)
-
 var errNoBackend = errors.New("no morning agent backend available")
 
 func ensureDir(dir string) error { return os.MkdirAll(dir, 0o700) }
-
-func (d *Comp) wakeWait() time.Duration {
-	if d.wakeWaitOverride > 0 {
-		return d.wakeWaitOverride
-	}
-	return defaultWakeWait
-}
-
-func (d *Comp) convWait() time.Duration {
-	if d.convWaitOverride > 0 {
-		return d.convWaitOverride
-	}
-	return defaultConvWait
-}
 
 func (d *Comp) seedOr() string {
 	if d.seed == nil {
@@ -45,93 +24,128 @@ func (d *Comp) seedOr() string {
 	return d.seed(personas.Morning)
 }
 
-// runSession is one morning briefing: greet, wait until the owner is up, then walk
-// them through today's events and handle any reschedule/add/cancel they ask for.
-func (d *Comp) runSession() {
-	defer d.releaseSession()
+// isEndWord reports whether the owner asked to close the morning session, using
+// the same detach words as the bridge.
+func isEndWord(lower string) bool {
+	switch strings.TrimSpace(lower) {
+	case "end", "stop", "exit", "/end":
+		return true
+	}
+	return false
+}
+
+// sendGreeting opens the day: one warm good-morning, then the session goes
+// dormant. It never lists events yet, that comes on the owner's first reply.
+// busy is cleared when it lands so an eager reply is answered next.
+func (d *Comp) sendGreeting() {
 	defer func() {
+		d.mu.Lock()
+		d.busy = false
+		d.mu.Unlock()
 		if r := recover(); r != nil {
-			d.log.Printf("briefing panicked: %v", r)
+			d.log.Printf("greeting panicked: %v", r)
+			d.mu.Lock()
+			d.active = false
+			d.mu.Unlock()
 		}
 	}()
 
 	transport, addr := d.ownerRoute()
 	if addr == "" {
 		d.log.Printf("no owner chat resolved; skipping morning briefing")
+		d.mu.Lock()
+		d.active = false
+		d.mu.Unlock()
 		return
 	}
-	seed := d.seedOr()
 	now := time.Now()
 
-	// Greeting turn. If the backend is unreachable, bail before sending anything so
+	// If the backend is unreachable, close the session before sending anything so
 	// we never greet without being able to follow through.
-	greet, sess, err := d.turn(withSeed(seed, greetPrompt(now)), "")
+	greet, sess, err := d.turn(withSeed(d.seedOr(), greetPrompt(now)), "")
 	if err != nil {
 		d.log.Printf("greeting: %v", err)
+		d.mu.Lock()
+		d.active = false
+		d.mu.Unlock()
 		return
 	}
 	g := strings.TrimSpace(parseFields(greet)["say"])
 	if g == "" {
 		g = "Good morning. Whenever you're up, give me a shout and I'll run through your day with you."
 	}
+	d.mu.Lock()
+	d.sessionID = sess
+	d.mu.Unlock()
 	d.sendTo(transport, addr, g)
+}
 
-	// Wait until they are actually up: a couple of gentle re-nudges, then stop.
-	wake, got := d.awaitWake(transport, addr)
-	if !got {
-		d.log.Printf("no morning reply; letting it go for the day")
+// handleReply drives one turn of the open session from an owner message. An
+// explicit end word closes it; anything else runs a briefing/conversation turn
+// (the first reply presents the day, the rest just talk). A message that lands
+// while a turn is still running is answered with a nudge rather than dropped
+// into a second concurrent turn.
+func (d *Comp) handleReply(text string) {
+	transport, addr := d.ownerRoute()
+	if addr == "" {
+		return
+	}
+	msg := strings.TrimSpace(text)
+	if isEndWord(strings.ToLower(msg)) {
+		d.mu.Lock()
+		d.active, d.first, d.sessionID = false, false, ""
+		d.mu.Unlock()
+		d.sendTo(transport, addr, "Alright, I'll let you get on with your day. Just say the word whenever you need me.")
 		return
 	}
 
-	// Briefing + conversation loop.
-	lastMsg, first := wake, true
-	for turn := 0; turn < maxConvTurns; turn++ {
-		events := d.todaysEvents(now)
-		out, s, err := d.turn(withSeed(seed, convPrompt(events, lastMsg, first, now)), sess)
-		if err != nil {
-			d.log.Printf("briefing turn: %v", err)
-			d.sendTo(transport, addr, "Sorry, I hit a snag on my end. We can pick this up later.")
-			return
-		}
-		sess, first = s, false
-
-		f := parseFields(out)
-		d.applyAction(f, transport, addr, now)
-		if say := strings.TrimSpace(f["say"]); say != "" && !strings.EqualFold(say, "none") {
-			d.sendTo(transport, addr, say)
-		}
-		if strings.EqualFold(strings.TrimSpace(f["end_session"]), "yes") {
-			return
-		}
-
-		rep, got := d.waitReply(transport, addr, d.convWait())
-		if !got {
-			d.sendTo(transport, addr, "No rush, we can pick this up whenever. Have a good one.")
-			return
-		}
-		lastMsg = rep
+	d.mu.Lock()
+	if d.busy {
+		d.mu.Unlock()
+		d.sendTo(transport, addr, "One sec, still finishing that.")
+		return
 	}
+	d.busy = true
+	first := d.first
+	d.first = false
+	sess := d.sessionID
+	d.mu.Unlock()
+
+	go d.runTurn(transport, addr, msg, first, sess)
 }
 
-// awaitWake parks on the owner's first reply, re-nudging gently a couple of times
-// before giving up for the day.
-func (d *Comp) awaitWake(transport, addr string) (string, bool) {
-	for n := 0; n <= maxWakeNudges; n++ {
-		if rep, got := d.waitReply(transport, addr, d.wakeWait()); got {
-			return rep, true
+// runTurn runs one briefing/conversation turn: build the prompt from today's
+// events and the owner's message, apply the one structured action it chose, and
+// send its message. The session stays open afterwards, until the owner ends it.
+func (d *Comp) runTurn(transport, addr, userMsg string, first bool, sess string) {
+	defer func() {
+		d.mu.Lock()
+		d.busy = false
+		d.mu.Unlock()
+		if r := recover(); r != nil {
+			d.log.Printf("briefing turn panicked: %v", r)
 		}
-		if n < maxWakeNudges {
-			d.sendTo(transport, addr, wakeNudge(n))
-		}
-	}
-	return "", false
-}
+	}()
 
-func wakeNudge(n int) string {
-	if n == 0 {
-		return "Still here whenever you're ready."
+	now := time.Now()
+	events := d.todaysEvents(now)
+	out, s, err := d.turn(withSeed(d.seedOr(), convPrompt(events, userMsg, first, now)), sess)
+	if err != nil {
+		d.log.Printf("briefing turn: %v", err)
+		d.sendTo(transport, addr, "Sorry, I hit a snag on my end. Try me again in a moment.")
+		return
 	}
-	return "No rush, just say the word when you're up and we'll run through today."
+	if s != "" {
+		d.mu.Lock()
+		d.sessionID = s
+		d.mu.Unlock()
+	}
+
+	f := parseFields(out)
+	d.applyAction(f, transport, addr, now)
+	if say := strings.TrimSpace(f["say"]); say != "" && !strings.EqualFold(say, "none") {
+		d.sendTo(transport, addr, say)
+	}
 }
 
 // --- events ------------------------------------------------------------------
@@ -316,7 +330,7 @@ func convPrompt(evs []store.Reminder, userMsg string, first bool, now time.Time)
 		"- cancel: remove an existing event. Fill ID.",
 		"- none: just talk, change nothing.",
 		"Times may be a clock time (3:30 PM), a relative offset (+2h, +1d), or a full date-time (2026-07-05T09:00). Use - for anything not applicable.",
-		"Set END_SESSION to yes only once they are done and need nothing more; otherwise no.",
+		"The conversation stays open until the owner says \"end\" themselves, so never try to close it or say goodbye first, just answer this turn and stop.",
 		"",
 		"Reply EXACTLY in these lines and nothing else:",
 		"SAY: your message to send now, warm and human, never using em-dashes",
@@ -326,7 +340,6 @@ func convPrompt(evs []store.Reminder, userMsg string, first bool, now time.Time)
 		"END: the end time, or -",
 		"OTHER: another person involved, or -",
 		"ID: the event id, if move or cancel, else -",
-		"END_SESSION: yes | no",
 	)
 	return strings.Join(lines, "\n")
 }
