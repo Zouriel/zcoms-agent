@@ -56,7 +56,7 @@ func newTestComp(t *testing.T, turn AgentTurn) (*Comp, *fakeClient, *store.Store
 	}
 	t.Cleanup(func() { st.Close() })
 	fc := &fakeClient{}
-	d := New(fc, st, "@owner", 999, nil, turn)
+	d := New(fc, st, "@owner", 999, nil, turn, nil)
 	d.log = log.New(io.Discard, "", 0)
 	return d, fc, st
 }
@@ -217,6 +217,40 @@ func TestOpensRunsAndEnds(t *testing.T) {
 	}
 	if fc.marks == 0 {
 		t.Fatal("consumed messages should be marked read")
+	}
+}
+
+// A shared-event reschedule uses the negotiate action: it hands the event id and
+// the owner's note to the reschedule negotiator and relays that authoritative
+// status, without echoing (or trusting) the model's own SAY line.
+func TestNegotiateFiresReschedule(t *testing.T) {
+	ft := &fakeTurn{outs: []string{
+		"SAY: I'll sort it out with Sam.\nACTION: negotiate\nID: 42\nNOTE: move our dinner, he's flexible\nTASK: -\nSTART: -\nEND: -\nOTHER: -",
+	}}
+	d, fc, _ := newTestComp(t, ft.run)
+
+	var gotID int64
+	var gotNote string
+	d.startResch = func(id int64, note string) string {
+		gotID, gotNote = id, note
+		return "📆 Reaching out to Sam about rescheduling."
+	}
+
+	if !d.Trigger(999, 1, "lineup reschedule my dinner with sam") {
+		t.Fatal("keyword should open the lineup")
+	}
+	waitCalls(t, ft, 1)
+	waitNotBusy(t, d)
+
+	if gotID != 42 || gotNote != "move our dinner, he's flexible" {
+		t.Fatalf("negotiate should hand the id+note to the negotiator, got id=%d note=%q", gotID, gotNote)
+	}
+	joined := strings.Join(fc.sentCopy(), "\n")
+	if !strings.Contains(joined, "Reaching out to Sam") {
+		t.Fatalf("should relay the negotiator's status, got %q", joined)
+	}
+	if strings.Contains(joined, "sort it out with Sam") {
+		t.Fatalf("the model's SAY must be suppressed for a negotiate hand-off, got %q", joined)
 	}
 }
 

@@ -45,6 +45,11 @@ type Comp struct {
 	log      *log.Logger
 	idleWait time.Duration
 
+	// startResch hands a shared event to the reschedule negotiator (which texts the
+	// other party on the owner's behalf) and returns a one-line acknowledgement. nil
+	// when the negotiator isn't wired (tests/headless).
+	startResch func(eventID int64, note string) string
+
 	mu        sync.Mutex
 	mainUser  string
 	ownerChat int64
@@ -57,13 +62,15 @@ type Comp struct {
 }
 
 // New builds the lineup runtime. turn may be nil (then Trigger is inert).
-func New(c commsClient, st *store.Store, mainUser string, ownerChat int64, seed func(key string) string, turn AgentTurn) *Comp {
+// startResch may be nil (the negotiate action then reports it's unavailable).
+func New(c commsClient, st *store.Store, mainUser string, ownerChat int64, seed func(key string) string, turn AgentTurn, startResch func(eventID int64, note string) string) *Comp {
 	return &Comp{
 		client: c, store: st, turn: turn, seed: seed,
-		log:       log.New(log.Writer(), "[lineup] ", log.LstdFlags),
-		idleWait:  defaultIdleWait,
-		mainUser:  mainUser,
-		ownerChat: ownerChat,
+		startResch: startResch,
+		log:        log.New(log.Writer(), "[lineup] ", log.LstdFlags),
+		idleWait:   defaultIdleWait,
+		mainUser:   mainUser,
+		ownerChat:  ownerChat,
 	}
 }
 

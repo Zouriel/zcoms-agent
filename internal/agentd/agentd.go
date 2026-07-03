@@ -159,7 +159,7 @@ func (a *Agent) buildRuntimes() error {
 	// end it or go quiet. Backend resolves live from the Lineup persona.
 	lineupBackend := func() runner.Backend { return lineup.LiveBackend(a.Store) }
 	a.Lineup = lineup.New(a.Client, a.Store, settings.MainUser, mainChat, seedFn,
-		lineup.NewAgentTurn(lineupBackend))
+		lineup.NewAgentTurn(lineupBackend), a.Reschedule.Start)
 
 	a.Bridge = bridge.New(bridge.Deps{
 		Client: a.Client, WAEnabled: settings.WhatsApp.Enabled,

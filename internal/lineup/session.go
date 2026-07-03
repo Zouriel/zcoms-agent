@@ -112,10 +112,32 @@ func (d *Comp) runTurn(transport, addr, userMsg string, first bool, sess string)
 	}
 
 	f := parseFields(out)
+	// A negotiate hand-off replies with the negotiator's own authoritative status,
+	// so the model's narration is not trusted or echoed for it.
+	switch strings.ToLower(strings.TrimSpace(f["action"])) {
+	case "negotiate", "reschedule":
+		d.negotiate(f, transport, addr)
+		return
+	}
 	d.applyAction(f, transport, addr, now)
 	if say := strings.TrimSpace(f["say"]); say != "" && !strings.EqualFold(say, "none") {
 		d.sendTo(transport, addr, say)
 	}
+}
+
+// negotiate hands a shared event to the reschedule negotiator and relays its
+// one-line status (which one is authoritative, not the model's SAY).
+func (d *Comp) negotiate(f map[string]string, transport, addr string) {
+	id := parseID(f["id"])
+	if id == 0 {
+		d.sendTo(transport, addr, "I need the event's id to reschedule it with someone. Ask me to show your agenda and I'll find it.")
+		return
+	}
+	if d.startResch == nil {
+		d.sendTo(transport, addr, "The reschedule assistant isn't available right now.")
+		return
+	}
+	d.sendTo(transport, addr, d.startResch(id, cleanField(f["note"])))
 }
 
 // close ends the session and stops the idle timer.
@@ -355,26 +377,28 @@ func lineupPrompt(today, upcoming []store.Reminder, userMsg string, first bool, 
 		lines = append(lines, "Continue the lineup. Answer what they just said.")
 	}
 	lines = append(lines,
-		"You can ONLY do three things: tell them what is on their schedule (today or the days ahead), add a new event, or reschedule (move) an existing one.",
-		"You have no shell, no files, no messaging, and no web. If they ask for anything outside their own schedule, briefly say that is outside what the lineup does and offer a schedule action instead.",
+		"You can tell them what is on their schedule (today or the days ahead), add a new event, or reschedule one, either by setting a new time yourself (move) or, for an event shared with another person, by handing it to the reschedule assistant that texts them to agree a time (negotiate).",
+		"You have no shell, no files, and no web, and you never message anyone yourself. The ONE exception is the negotiate action below, which hands a shared event to the reschedule assistant to do the talking. If they ask for anything else outside their own schedule, briefly say that is outside what the lineup does and offer a schedule action instead.",
 		"Always be schedule-aware, and leave a SAFE MARGIN between events. Never call back-to-back timing fine: real life needs a buffer to wrap up, travel, and get set up, so keep at least about 30 minutes of clear space between one thing ending and the next starting (more when travel is obviously involved).",
 		"Whenever they ask whether they can do something at a time, or you add or move an event, find what is already near that time above and judge the REAL usable window AFTER subtracting that buffer, not the raw clock gap. A 6pm date before a 7pm standup is NOT an hour, once you leave time to finish up and get there it is barely anything, so say that plainly and suggest a fix (start earlier, keep it short and casual, or move one of them). If there is genuinely enough room with the margin, say so. It is their call, so inform and suggest, never flatly refuse. When you add or move an event, keep that margin too, do not jam it right up against another.",
 		"",
 		"Available actions (choose ONE per reply):",
 		"- add: put a new event on the schedule. Fill TASK, and START/END/OTHER when known.",
-		"- move: reschedule an existing event. Fill ID and the new START (and END if given).",
+		"- move: reschedule an event to a time the owner gave, or a solo event with no one else on it. Fill ID and the new START (and END if given). Do NOT invent a time for a shared event yourself.",
+		"- negotiate: reschedule an event that is SHARED with another person (shown as 'with X') when the owner has not fixed a specific time both can do. This hands it to the reschedule assistant, which texts that person to agree a new time and reports back. Fill ID and a short NOTE (what the owner wants and any limits). Do not pick a time yourself.",
 		"- none: just answer or read out the agenda, change nothing.",
 		"Times may be a clock time (3:30 PM), a relative offset (+2h, +1d), or a full date-time (2026-07-05T09:00). Use - for anything not applicable.",
 		"The session stays open until the owner says \"end\" or \"stop\", or they go quiet, so never say goodbye or try to close it yourself, just answer this turn.",
 		"",
 		"Reply EXACTLY in these lines and nothing else:",
 		"SAY: your message to send now, warm and human, never using em-dashes",
-		"ACTION: none | add | move",
+		"ACTION: none | add | move | negotiate",
 		"TASK: the event, if adding, else -",
 		"START: the start time, if add or move, else -",
 		"END: the end time, or -",
 		"OTHER: another person involved, or -",
-		"ID: the event id, if moving, else -",
+		"ID: the event id, if moving or negotiating, else -",
+		"NOTE: your brief to the reschedule assistant, if negotiating, else -",
 	)
 	return strings.Join(lines, "\n")
 }
