@@ -165,6 +165,14 @@ func (a *Agent) buildRuntimes() error {
 		Client: a.Client, WAEnabled: settings.WhatsApp.Enabled,
 		Locations: locs, Allow: allow, Agents: agents, Settings: settings, MainChatID: mainChat,
 		PersonaSeed: seedFn, Reminders: a.Reminders,
+		// Late-bound: errands is built just below, so read it at call time (a user's
+		// errand command lands long after buildRuntimes finishes).
+		ErrandCmd: func(text string) string {
+			if a.Errands == nil {
+				return "Errands aren't available right now."
+			}
+			return a.Errands.HandleCommand(text)
+		},
 		Phrase: func(key string) string { return bridge.PhraseOr(a.Store, key) },
 	})
 	a.Errands = errands.New(a.Client, settings.WhatsApp.Enabled, agents, mainChat, seedFn)

@@ -31,8 +31,9 @@ type Comp struct {
 	settings         Settings
 	mainChatID       int64
 	personaSeed      func(key string) string
-	reminders        *reminders.Comp         // in-process reminder loop (may be nil)
-	phrase           func(key string) string // editable canned messages (may be nil)
+	reminders        *reminders.Comp          // in-process reminder loop (may be nil)
+	errandCmd        func(text string) string // in-process errands command handler (may be nil)
+	phrase           func(key string) string  // editable canned messages (may be nil)
 
 	mu       sync.Mutex
 	triageMu sync.Mutex
@@ -125,36 +126,15 @@ func (d *Comp) currentTriage() TriageSettings {
 	return d.settings.Triage
 }
 
-// errandCommand forwards an `errand …` command to the errands component over
-// errands.sock and returns its reply (or a clear error string).
+// errandCommand runs an `errand …` command against the in-process errands
+// runtime and returns its immediate reply. Errands used to be a separate service
+// on errands.sock; it now lives in the agent process (like reminders), so this
+// calls it directly instead of dialing a socket.
 func (d *Comp) errandCommand(text string) string {
-	dir, err := runner.DefaultAppDir()
-	if err != nil {
-		return "⚠️ " + err.Error()
+	if d.errandCmd == nil {
+		return "Errands aren't available right now."
 	}
-	conn, err := net.DialTimeout("unix", filepath.Join(dir, "errands.sock"), 2*time.Second)
-	if err != nil {
-		return "The errands component isn't running — install it with `zc install errands`."
-	}
-	defer conn.Close()
-	req, _ := json.Marshal(struct {
-		Text string `json:"text"`
-	}{text})
-	_, _ = conn.Write(append(req, '\n'))
-	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	line, _ := bufio.NewReader(conn).ReadBytes('\n')
-	var resp struct {
-		OK    bool   `json:"ok"`
-		Reply string `json:"reply"`
-		Error string `json:"error"`
-	}
-	if json.Unmarshal(line, &resp) != nil {
-		return "⚠️ couldn't reach the errands component"
-	}
-	if !resp.OK {
-		return "⚠️ " + resp.Error
-	}
-	return resp.Reply
+	return d.errandCmd(text)
 }
 
 // handleErrandCommand relays an `errand …` bridge command to the errands component.

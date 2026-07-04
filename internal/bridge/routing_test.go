@@ -18,6 +18,25 @@ func testComp() *Comp {
 	}
 }
 
+// errand commands run against the injected in-process errands handler (errands
+// no longer lives on its own errands.sock service), not a dead socket dial.
+func TestErrandCommandUsesInProcessHandler(t *testing.T) {
+	d := testComp()
+	var got string
+	d.errandCmd = func(text string) string { got = text; return "ok: " + text }
+	if reply := d.errandCommand("errand yes 123"); reply != "ok: errand yes 123" {
+		t.Fatalf("errand reply = %q", reply)
+	}
+	if got != "errand yes 123" {
+		t.Fatalf("handler got %q, want the full command text", got)
+	}
+	// With no handler wired it degrades gracefully, no socket dial, no panic.
+	d.errandCmd = nil
+	if reply := d.errandCommand("errand list"); !strings.Contains(reply, "aren't available") {
+		t.Fatalf("nil-handler reply = %q", reply)
+	}
+}
+
 // A Telegram event creates a telegram-routed session keyed by user id.
 func TestStateForTelegram(t *testing.T) {
 	d := testComp()
