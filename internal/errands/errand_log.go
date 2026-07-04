@@ -11,6 +11,7 @@ import (
 
 const (
 	errandLogInterviewer = "interviewer"
+	errandLogGuard       = "guard"
 	errandLogProducer    = "producer"
 	errandLogLifecycle   = "lifecycle"
 )

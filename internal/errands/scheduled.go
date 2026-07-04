@@ -128,7 +128,7 @@ func parseErrandSchedule(s string, now time.Time) (ErrandSpec, time.Time, error)
 	if i < 0 {
 		return ErrandSpec{}, time.Time{}, errors.New(usage)
 	}
-	spec := ErrandSpec{Brief: strings.TrimSpace(s[i+1:])}
+	spec := ErrandSpec{Brief: strings.TrimSpace(s[i+1:]), DeliverToTarget: true}
 	toks := strings.Fields(strings.TrimSpace(s[:i]))
 
 	// Leading flags, then the target token, then the time.
@@ -137,6 +137,8 @@ func parseErrandSchedule(s string, now time.Time) (ErrandSpec, time.Time, error)
 		switch strings.ToLower(toks[n]) {
 		case "deliver":
 			spec.DeliverToTarget = true
+		case "private", "noshare":
+			spec.DeliverToTarget = false
 		case "go", "auto":
 			spec.AutoStart = true
 		default:

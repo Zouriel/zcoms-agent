@@ -85,6 +85,17 @@ func (a *Agent) jsonQuery(args []string) (string, error) {
 			return "", perr
 		}
 		v, err = a.Store.ListReminderEvents(id)
+	case "errands":
+		v = a.Errands.Views()
+	case "errand":
+		if len(args) < 2 {
+			return "", fmt.Errorf("usage: json errand <id>")
+		}
+		det, ok := a.Errands.Detail(args[1])
+		if !ok {
+			return "", fmt.Errorf("no errand %q", args[1])
+		}
+		v = det
 	case "reminder-settings":
 		v = reminders.LoadConfig(a.Store)
 	case "morning-settings":

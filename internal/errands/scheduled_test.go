@@ -70,8 +70,10 @@ func TestParseErrandSchedule(t *testing.T) {
 		if spec.Brief != "make a CV" {
 			t.Errorf("brief = %q, want 'make a CV'", spec.Brief)
 		}
-		if spec.AutoStart || spec.DeliverToTarget {
-			t.Errorf("flags should default off, got autostart=%v deliver=%v", spec.AutoStart, spec.DeliverToTarget)
+		// AutoStart defaults off (confirm-first); DeliverToTarget defaults ON (the
+		// deliverable goes to the contact who asked unless `private` opts out).
+		if spec.AutoStart || !spec.DeliverToTarget {
+			t.Errorf("defaults wrong, got autostart=%v deliver=%v (want false/true)", spec.AutoStart, spec.DeliverToTarget)
 		}
 		want := time.Date(2026, 6, 18, 15, 30, 0, 0, time.Local)
 		if !runAt.Equal(want) {
@@ -86,6 +88,19 @@ func TestParseErrandSchedule(t *testing.T) {
 		}
 		if !spec.DeliverToTarget || !spec.AutoStart {
 			t.Errorf("expected both flags set, got deliver=%v autostart=%v", spec.DeliverToTarget, spec.AutoStart)
+		}
+		if spec.Target != "@bob" {
+			t.Errorf("target = %q, want @bob", spec.Target)
+		}
+	})
+
+	t.Run("private opts out of deliver-to-contact", func(t *testing.T) {
+		spec, _, err := parseErrandSchedule(" private @bob at 15:30 | just report back", now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if spec.DeliverToTarget {
+			t.Errorf("private should turn deliver-to-contact off, got deliver=%v", spec.DeliverToTarget)
 		}
 		if spec.Target != "@bob" {
 			t.Errorf("target = %q, want @bob", spec.Target)

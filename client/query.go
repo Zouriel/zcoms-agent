@@ -95,6 +95,48 @@ type Reminder struct {
 	Runs               int    `json:"runs"`
 }
 
+// ErrandView is one row on the console's errands list. Mirrors errands.ErrandView.
+type ErrandView struct {
+	ID         string `json:"id"`
+	Status     string `json:"status"`
+	Brief      string `json:"brief"`
+	TargetName string `json:"target_name"`
+	Platform   string `json:"platform"`
+	Delivered  bool   `json:"delivered"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
+// ErrandEvent is one timestamped step in an errand's flow.
+type ErrandEvent struct {
+	Time   string `json:"time"`
+	Role   string `json:"role"`
+	Event  string `json:"event"`
+	Detail string `json:"detail"`
+}
+
+// ErrandDelivery is one file the errand shipped out.
+type ErrandDelivery struct {
+	To      string `json:"to"`
+	Path    string `json:"path"`
+	Caption string `json:"caption,omitempty"`
+	At      string `json:"at"`
+}
+
+// ErrandDetail is one errand's full flow. Mirrors errands.ErrandDetail.
+type ErrandDetail struct {
+	ErrandView
+	AutoStart       bool             `json:"auto_start"`
+	DeliverToTarget bool             `json:"deliver_to_target"`
+	GuardVerdict    string           `json:"guard_verdict,omitempty"`
+	InterviewFile   string           `json:"interview_file,omitempty"`
+	CollectedInfo   string           `json:"collected_info,omitempty"`
+	Transcript      []string         `json:"transcript,omitempty"`
+	ContextFiles    []string         `json:"context_files,omitempty"`
+	Deliveries      []ErrandDelivery `json:"deliveries,omitempty"`
+	Timeline        []ErrandEvent    `json:"timeline"`
+}
+
 func (c *Client) queryJSON(arg string, out any) error {
 	reply, err := c.do(request{Text: "json " + arg})
 	if err != nil {
@@ -167,6 +209,19 @@ func (c *Client) ReminderConfig() (ReminderConfig, error) {
 func (c *Client) QuerySessions(workspaceID int64) ([]Session, error) {
 	var out []Session
 	return out, c.queryJSON("sessions "+itoa(workspaceID), &out)
+}
+
+// QueryErrands returns every errand (active + terminal), newest first, for the
+// console's errands list.
+func (c *Client) QueryErrands() ([]ErrandView, error) {
+	var out []ErrandView
+	return out, c.queryJSON("errands", &out)
+}
+
+// QueryErrand returns one errand's full flow (metadata, timeline, deliveries).
+func (c *Client) QueryErrand(id string) (ErrandDetail, error) {
+	var out ErrandDetail
+	return out, c.queryJSON("errand "+id, &out)
 }
 
 func itoa(n int64) string {

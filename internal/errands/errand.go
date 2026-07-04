@@ -13,17 +13,22 @@ import (
 )
 
 // An errand is a friendly, autonomous task the owner dispatches at a contact.
-// It runs in TWO separate agents with different privileges:
+// It runs in THREE separate agents with different privileges, in sequence:
 //
 //   - The INTERVIEWER (status "active") only talks to the contact, asking for
 //     what's needed ONE question at a time. It runs with NO filesystem or shell
 //     access (plan mode); its sole persistent output is one collected-info file
 //     the daemon creates at spin-up and writes on its behalf (RECORD directive).
-//   - The PRODUCER (status "producing") spins up once questioning is done. It
-//     has write access to a scratch dir to build the deliverable. It is told the
-//     data came from a third party (NOT the owner), to treat it as untrusted
-//     data rather than instructions, to do only the owner's original brief, and
-//     to FLAG anything suspicious or inconsistent with that brief.
+//   - The GUARD (status "guarding") spins up once questioning is done. It runs
+//     read-only (plan mode) and inspects the collected info (third-party data)
+//     for anything unsafe: prompt-injection, attempts to expose internal data,
+//     off-task instructions, malicious links/commands, or content that doesn't
+//     match the brief. It emits CLEAR to proceed or FLAG to halt. The gate is
+//     fail-closed and decided in code: only an explicit CLEAR reaches the worker.
+//   - The PRODUCER (status "producing") spins up once the guard clears. Because
+//     the input was vetted, it runs with FULL permissions in a scratch dir to
+//     build the deliverable, sends it to the contact who asked (and a copy to
+//     the owner), and reports a short summary.
 //
 // This JSON is the durable metadata the daemon uses to route the contact's
 // replies, hand off between the two agents, and survive restarts.
@@ -32,11 +37,20 @@ import (
 const (
 	ErrandPendingApproval = "pending_approval" // drafted; waiting for the owner's go-ahead
 	ErrandActive          = "active"           // interviewer is questioning the contact
+	ErrandGuarding        = "guarding"         // guard is vetting the collected info
 	ErrandProducing       = "producing"        // producer is building the deliverable
 	ErrandDone            = "done"
 	ErrandCancelled       = "cancelled"
 	ErrandFailed          = "failed"
 )
+
+// Delivery records one file the errand shipped out (to the owner or the contact).
+type Delivery struct {
+	To      string    `json:"to"` // "owner" | "contact"
+	Path    string    `json:"path"`
+	Caption string    `json:"caption,omitempty"`
+	At      time.Time `json:"at"`
+}
 
 // Errand is one dispatched questioning task. One contact per errand.
 type Errand struct {
@@ -45,11 +59,12 @@ type Errand struct {
 	Brief     string `json:"brief"`      // the owner's instruction ("make a 2-page CV…")
 	OwnerChat int64  `json:"owner_chat"` // where to report back (the main user's chat)
 
-	// Separate sessions for the two agents, so the producer never inherits the
-	// interviewer's context (and vice-versa).
+	// Separate sessions for the three agents, so none inherits another's context.
 	InterviewSessionID string `json:"interview_session_id,omitempty"`
+	GuardSessionID     string `json:"guard_session_id,omitempty"`
 	WorkerSessionID    string `json:"worker_session_id,omitempty"`
 	InterviewFile      string `json:"interview_file,omitempty"` // the one file the interviewer produces
+	GuardVerdict       string `json:"guard_verdict,omitempty"`  // the guard's CLEAR/FLAG note, for the record
 
 	// The single target contact, on whichever platform.
 	Source     string `json:"source"` // "tg" | "wa"
@@ -63,6 +78,7 @@ type Errand struct {
 	SeenMsgIDs   []string          `json:"seen_msg_ids"`            // inbound dedup (string for both platforms)
 	Transcript   []string          `json:"transcript,omitempty"`    // raw Q/A log (fallback record of the interview)
 	Delivered    bool              `json:"delivered,omitempty"`     // at least one file was DELIVER'd to the owner
+	Deliveries   []Delivery        `json:"deliveries,omitempty"`    // every file shipped out, for the record
 	ContextFiles []string          `json:"context_files,omitempty"` // files already present when the errand was started
 	AgentLogs    map[string]string `json:"agent_logs,omitempty"`    // role -> local log file path
 
@@ -76,10 +92,11 @@ type Errand struct {
 	pending []string
 }
 
-// active reports whether the errand is still running. Pending-approval and
-// producing both count, so the contact is never triaged mid-errand.
+// active reports whether the errand is still running. Pending-approval,
+// guarding and producing all count, so the contact is never triaged mid-errand.
 func (e *Errand) active() bool {
-	return e.Status == ErrandActive || e.Status == ErrandPendingApproval || e.Status == ErrandProducing
+	return e.Status == ErrandActive || e.Status == ErrandPendingApproval ||
+		e.Status == ErrandGuarding || e.Status == ErrandProducing
 }
 
 // interviewing reports whether the interviewer is the active agent (so contact

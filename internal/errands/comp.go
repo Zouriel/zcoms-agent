@@ -287,6 +287,48 @@ func (d *Comp) cancelErrand(id string) (*Errand, bool) {
 	return e, ok
 }
 
+// retryErrand puts a stalled or failed errand back in motion from the furthest
+// phase its progress supports. It is the escape hatch when a turn errored with no
+// contact reply to trigger the promised retry (e.g. an auto-started errand whose
+// very first greeting failed) or when a failed errand should be re-run.
+func (d *Comp) retryErrand(id string) (string, bool) {
+	d.mu.Lock()
+	e, ok := d.errands[id]
+	d.mu.Unlock()
+	if !ok {
+		return "", false
+	}
+	if e.Status == ErrandCancelled || e.Status == ErrandDone {
+		return "Errand " + e.ID + " is " + e.Status + " and can't be retried; start a new one.", true
+	}
+
+	// Resume from as far along as the recorded progress allows.
+	phase, prompt := ErrandActive, errandBeginPrompt(e)
+	switch {
+	case e.WorkerSessionID != "" || e.Status == ErrandProducing:
+		phase, prompt = ErrandProducing, workerContinuePrompt(e)
+	case d.collectedInfoReady(e):
+		phase, prompt = ErrandGuarding, guardStartPrompt(e)
+	}
+	d.setErrandStatus(e, phase)
+	d.logErrand(e, errandLogLifecycle, "retry", "owner retried; resuming at %s", phase)
+	d.driveErrandAsync(e, prompt)
+	return fmt.Sprintf("🔁 Retrying errand %s from the %s phase…", e.ID, phase), true
+}
+
+// collectedInfoReady reports whether the interview produced a usable collected-info
+// file (so a retry can skip straight to guarding rather than re-interviewing).
+func (d *Comp) collectedInfoReady(e *Errand) bool {
+	if e.InterviewFile == "" {
+		return false
+	}
+	info, err := os.ReadFile(e.InterviewFile)
+	if err != nil {
+		return false
+	}
+	return !strings.Contains(string(info), "(awaiting answers)")
+}
+
 func (d *Comp) errandExists(id string) bool {
 	d.mu.Lock()
 	_, ok := d.errands[id]
@@ -326,12 +368,17 @@ func parseErrandStart(s string) (ErrandSpec, error) {
 		return ErrandSpec{}, fmt.Errorf("usage: errand start [deliver] [go] <@user|wa:JID|#index> | <brief>")
 	}
 	left := strings.Fields(strings.TrimSpace(s[:i]))
-	spec := ErrandSpec{Brief: strings.TrimSpace(s[i+1:])}
+	// The producer sends the finished deliverable to the contact by default (they
+	// are the person who asked). `private`/`noshare` opts out; `deliver` is kept as
+	// an accepted no-op for backward compatibility.
+	spec := ErrandSpec{Brief: strings.TrimSpace(s[i+1:]), DeliverToTarget: true}
 	var target string
 	for _, tok := range left {
 		switch strings.ToLower(tok) {
 		case "deliver":
 			spec.DeliverToTarget = true
+		case "private", "noshare":
+			spec.DeliverToTarget = false
 		case "go", "now", "auto":
 			spec.AutoStart = true
 		default:
@@ -355,7 +402,7 @@ func parseErrandStart(s string) (ErrandSpec, error) {
 func (d *Comp) handleErrandCommand(text string) string {
 	fields := strings.Fields(text)
 	if len(fields) < 2 {
-		return d.errandListText() + "\n\nCommands: errand list · errand start [deliver] [go] <@user|wa:JID|#index> | <brief> · errand schedule [deliver] [go] <target> at <time> | <brief> · errand scheduled · errand unschedule <id> · errand yes [id] · errand no [id] · errand edit [id] <changes> · errand cancel <id>"
+		return d.errandListText() + "\n\nCommands: errand list · errand start [private] [go] <@user|wa:JID|#index> | <brief> · errand schedule [private] [go] <target> at <time> | <brief> · errand scheduled · errand unschedule <id> · errand yes [id] · errand no [id] · errand edit [id] <changes> · errand retry <id> · errand cancel <id>"
 	}
 	switch strings.ToLower(fields[1]) {
 	case "list":
@@ -438,6 +485,15 @@ func (d *Comp) handleErrandCommand(text string) string {
 			return "🛑 Cancelled errand " + e.ID + ". " + e.TargetName + " won't be messaged further."
 		}
 		return "No errand with id " + fields[2] + "."
+	case "retry":
+		if len(fields) < 3 {
+			return "Usage: errand retry <id>"
+		}
+		msg, ok := d.retryErrand(fields[2])
+		if !ok {
+			return "No errand with id " + fields[2] + "."
+		}
+		return msg
 	default:
 		return "Unknown errand command. Try: errand list · errand start … · errand yes · errand cancel <id>"
 	}
