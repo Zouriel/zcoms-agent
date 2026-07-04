@@ -365,13 +365,15 @@ func (d *Comp) errandListText() string {
 func parseErrandStart(s string) (ErrandSpec, error) {
 	i := strings.Index(s, "|")
 	if i < 0 {
-		return ErrandSpec{}, fmt.Errorf("usage: errand start [deliver] [go] <@user|wa:JID|#index> | <brief>")
+		return ErrandSpec{}, fmt.Errorf("usage: errand start [plan] [private] <@user|wa:JID|#index> | <brief>")
 	}
 	left := strings.Fields(strings.TrimSpace(s[:i]))
-	// The producer sends the finished deliverable to the contact by default (they
-	// are the person who asked). `private`/`noshare` opts out; `deliver` is kept as
-	// an accepted no-op for backward compatibility.
-	spec := ErrandSpec{Brief: strings.TrimSpace(s[i+1:]), DeliverToTarget: true}
+	// The errand starts messaging the contact immediately by default; `plan`/`draft`
+	// opts into the approval step (draft the questions and wait for the owner). The
+	// producer also sends the finished deliverable to the contact by default (they
+	// are the person who asked); `private`/`noshare` opts out. `deliver` and `go`
+	// are kept as accepted no-ops for backward compatibility.
+	spec := ErrandSpec{Brief: strings.TrimSpace(s[i+1:]), DeliverToTarget: true, AutoStart: true}
 	var target string
 	for _, tok := range left {
 		switch strings.ToLower(tok) {
@@ -379,6 +381,8 @@ func parseErrandStart(s string) (ErrandSpec, error) {
 			spec.DeliverToTarget = true
 		case "private", "noshare":
 			spec.DeliverToTarget = false
+		case "plan", "draft":
+			spec.AutoStart = false
 		case "go", "now", "auto":
 			spec.AutoStart = true
 		default:

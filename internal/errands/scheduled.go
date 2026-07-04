@@ -123,12 +123,14 @@ func LoadScheduled() ([]*ScheduledErrand, error) {
 // so everything between it and the "|" is the time. The optional at/in/on word
 // is sugar and is stripped. Flags must come before the target.
 func parseErrandSchedule(s string, now time.Time) (ErrandSpec, time.Time, error) {
-	usage := "usage: errand schedule [deliver] [go] <@user|wa:JID|#index> at <time> | <brief>"
+	usage := "usage: errand schedule [plan] [private] <@user|wa:JID|#index> at <time> | <brief>"
 	i := strings.Index(s, "|")
 	if i < 0 {
 		return ErrandSpec{}, time.Time{}, errors.New(usage)
 	}
-	spec := ErrandSpec{Brief: strings.TrimSpace(s[i+1:]), DeliverToTarget: true}
+	// Same defaults as `errand start`: fires immediately at its time; `plan`/`draft`
+	// opts into the approval step. `go`/`deliver` remain accepted no-ops.
+	spec := ErrandSpec{Brief: strings.TrimSpace(s[i+1:]), DeliverToTarget: true, AutoStart: true}
 	toks := strings.Fields(strings.TrimSpace(s[:i]))
 
 	// Leading flags, then the target token, then the time.
@@ -139,6 +141,8 @@ func parseErrandSchedule(s string, now time.Time) (ErrandSpec, time.Time, error)
 			spec.DeliverToTarget = true
 		case "private", "noshare":
 			spec.DeliverToTarget = false
+		case "plan", "draft":
+			spec.AutoStart = false
 		case "go", "auto":
 			spec.AutoStart = true
 		default:
