@@ -102,6 +102,32 @@ type claudeJSON struct {
 	SessionID string `json:"session_id"`
 }
 
+// stagingToolAllowlist pre-approves the document production toolchain for a
+// writable-staging agent: headless-browser HTML to PDF, PDF and image
+// utilities, common document renderers, and the basic file moves those need.
+// acceptEdits already auto-approves the agent's file writes but not shell, so
+// this is what lets the agent hand back a finished artifact (a rendered PDF)
+// instead of raw source. It is intentionally a fixed toolchain, not a general
+// shell, because a staging agent (notably the errand producer) may be working
+// with untrusted third-party input. Extend this list when a new deliverable
+// type needs another render tool.
+var stagingToolAllowlist = []string{
+	// headless browsers: HTML to PDF
+	"Bash(brave:*)", "Bash(brave-browser:*)",
+	"Bash(chromium:*)", "Bash(chromium-browser:*)",
+	"Bash(google-chrome:*)", "Bash(google-chrome-stable:*)",
+	// PDF utilities
+	"Bash(pdftoppm:*)", "Bash(pdfinfo:*)", "Bash(pdftotext:*)",
+	"Bash(pdfunite:*)", "Bash(pdfseparate:*)", "Bash(qpdf:*)", "Bash(gs:*)",
+	// image utilities
+	"Bash(magick:*)", "Bash(convert:*)", "Bash(mogrify:*)", "Bash(identify:*)",
+	// other document renderers
+	"Bash(libreoffice:*)", "Bash(soffice:*)",
+	"Bash(wkhtmltopdf:*)", "Bash(pandoc:*)",
+	// basic file staging within the scratch dir
+	"Bash(cp:*)", "Bash(mv:*)", "Bash(mkdir:*)", "Bash(ls:*)", "Bash(cat:*)",
+}
+
 // permissionArgs maps a role to the claude flags that let it run unattended.
 func permissionArgs(role Role) []string {
 	switch role {
@@ -126,8 +152,12 @@ func RunClaude(dir, prompt, resumeID string, role Role, stagingWritable bool) (R
 	}
 	if stagingWritable {
 		// Let the read-role agent write to its staging dir; claude plan mode would
-		// otherwise block file creation.
+		// otherwise block file creation. acceptEdits auto-approves file writes but
+		// not shell, so also pre-approve the document production toolchain the agent
+		// needs to render a deliverable into a finished file (e.g. a PDF) rather
+		// than shipping raw source it asks a non-technical recipient to print.
 		args = append(args, "--permission-mode", "acceptEdits")
+		args = append(args, "--allowedTools", strings.Join(stagingToolAllowlist, ","))
 	} else {
 		args = append(args, permissionArgs(role)...)
 	}
