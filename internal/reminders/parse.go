@@ -57,3 +57,39 @@ func ParseRemind(text string) (who, task string, ok bool) {
 
 // isSelf reports whether a <who> refers to the requester.
 func isSelf(who string) bool { return selfWords[norm(who)] }
+
+// thirdPartyRe matches a task that is itself a request to remind someone else:
+// "remind Raani to take the report", "please remind my wife about the class".
+// <who> is up to three words so "my wife" and "first wife" match, and the task
+// is what follows the connecting word.
+var thirdPartyRe = regexp.MustCompile(`(?i)^\s*(?:please\s+|can\s+you\s+|could\s+you\s+)*remind(?:er)?\s+(\S+(?:\s+\S+){0,2}?)\s+(?:to|about|that)\s+(.+)$`)
+
+// ThirdParty reports whether a task text is really a request to remind someone
+// ELSE, and splits it into that person and the task itself.
+//
+// It exists because the schedule agents (morning, lineup) can only add events to
+// the owner's own calendar: handed "remind Raani to take her father's report"
+// they filed it as the owner's own task, and the reminder loop then messaged the
+// owner as if he were Raani. Callers use this to route such a request to the
+// reminders module instead, where resolveTarget applies the §6 trust gate.
+//
+// ok is false for the owner's own reminders ("remind me to …"), which belong on
+// their own schedule exactly as written.
+func ThirdParty(task string) (who, rest string, ok bool) {
+	m := thirdPartyRe.FindStringSubmatch(strings.TrimSpace(task))
+	if m == nil {
+		return "", "", false
+	}
+	who, rest = strings.TrimSpace(m[1]), strings.TrimSpace(m[2])
+	if who == "" || rest == "" || isSelf(who) {
+		return "", "", false
+	}
+	// "remind me and Sara to …" is still the owner's own task; only a clean
+	// someone-else target should leave their calendar.
+	for _, w := range strings.Fields(who) {
+		if isSelf(w) {
+			return "", "", false
+		}
+	}
+	return who, rest, true
+}

@@ -4,12 +4,14 @@ import (
 	"errors"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Zouriel/zcoms-agent/internal/eventtime"
 	"github.com/Zouriel/zcoms-agent/internal/personas"
+	"github.com/Zouriel/zcoms-agent/internal/reminders"
 	"github.com/Zouriel/zcoms-agent/internal/store"
 	"github.com/Zouriel/zcoms-agent/internal/timeexpr"
 )
@@ -129,8 +131,8 @@ func (d *Comp) runTurn(transport, addr, userMsg string, first bool, sess string)
 	}()
 
 	now := time.Now()
-	events := d.todaysEvents(now)
-	out, s, err := d.turn(withSeed(d.seedOr(), convPrompt(events, userMsg, first, now)), sess)
+	events, upcoming, undated := d.agenda(now)
+	out, s, err := d.turn(withSeed(d.seedOr(), convPrompt(events, upcoming, undated, userMsg, first, now)), sess)
 	if err != nil {
 		d.log.Printf("briefing turn: %v", err)
 		d.sendTo(transport, addr, "Sorry, I hit a snag on my end. Try me again in a moment.")
@@ -151,21 +153,52 @@ func (d *Comp) runTurn(transport, addr, userMsg string, first bool, sess string)
 
 // --- events ------------------------------------------------------------------
 
-// todaysEvents returns the owner's active reminders whose event falls on today.
-func (d *Comp) todaysEvents(now time.Time) []store.Reminder {
+// agenda splits the owner's active reminders into today, the week ahead, and the
+// ones carrying no date at all. The briefing used to see today only, so anything
+// logged for a later day was invisible and the morning agent kept reporting an
+// open schedule; undated items were invisible everywhere, since they match no
+// calendar day.
+func (d *Comp) agenda(now time.Time) (today, upcoming, undated []store.Reminder) {
 	all, err := d.store.ActiveReminders()
 	if err != nil {
 		d.log.Printf("events: %v", err)
-		return nil
+		return nil, nil, nil
 	}
-	today := now.Format("2006-01-02")
-	var out []store.Reminder
+	loc := now.Location()
+	todayKey := now.Format("2006-01-02")
+	horizon := now.AddDate(0, 0, 8).Format("2006-01-02")
 	for _, r := range all {
-		if eventDay(r, now.Location()) == today {
-			out = append(out, r)
+		switch day := eventDay(r, loc); {
+		case day == "":
+			undated = append(undated, r)
+		case day == todayKey:
+			today = append(today, r)
+		case day > todayKey && day < horizon:
+			upcoming = append(upcoming, r)
 		}
 	}
-	return out
+	sortByStart(today, loc)
+	sortByStart(upcoming, loc)
+	return today, upcoming, undated
+}
+
+// todaysEvents returns just the events on today, for callers that only need them.
+func (d *Comp) todaysEvents(now time.Time) []store.Reminder {
+	today, _, _ := d.agenda(now)
+	return today
+}
+
+func sortByStart(rs []store.Reminder, loc *time.Location) {
+	sort.SliceStable(rs, func(i, j int) bool {
+		a, b := parseLocal(rs[i].EventStart, loc), parseLocal(rs[j].EventStart, loc)
+		if a.IsZero() {
+			a = parseLocal(rs[i].NextAt, loc)
+		}
+		if b.IsZero() {
+			b = parseLocal(rs[j].NextAt, loc)
+		}
+		return a.Before(b)
+	})
 }
 
 // eventDay is the local calendar day a reminder sits on: its event start if set,
@@ -232,6 +265,16 @@ func (d *Comp) applyAction(f map[string]string, transport, addr string, now time
 		task := strings.TrimSpace(f["task"])
 		if task == "" {
 			return
+		}
+		// "remind <someone else> to …" is not an entry on the owner's calendar. Filed
+		// here it became an owner event whose task named another person, and the
+		// reminder loop then greeted the owner by that person's name. Hand it to the
+		// reminders module, which resolves the contact and applies the trust gate.
+		if who, rest, ok := reminders.ThirdParty(task); ok {
+			if remind := d.remindDelegate(); remind != nil {
+				d.sendTo(transport, addr, remind(who, rest))
+				return
+			}
 		}
 		start := d.parseTimeField(f["start"], now)
 		if _, err := d.store.CreateReminder(store.Reminder{
@@ -316,13 +359,19 @@ func greetPrompt(now time.Time) string {
 	}, "\n")
 }
 
-func convPrompt(evs []store.Reminder, userMsg string, first bool, now time.Time) string {
+func convPrompt(evs, upcoming, undated []store.Reminder, userMsg string, first bool, now time.Time) string {
 	loc := now.Location()
 	lines := []string{
 		"You are the owner's warm morning assistant, going through their day with them. Right now it is " + now.Format("Mon 2006-01-02 3:04 PM") + ".",
 		"The owner just said: " + quote(userMsg),
 		"Their events for today (each has an id):",
 		formatEvents(evs, loc),
+		"",
+		"Coming up over the next week (mention these only if today is quiet or they ask about later):",
+		formatEvents(upcoming, loc),
+		"",
+		"On their list with no date set (bring one up only if it fits, and offer to put a time on it):",
+		formatEvents(undated, loc),
 		"",
 	}
 	if first {
@@ -379,4 +428,11 @@ func parseFields(text string) map[string]string {
 		}
 	}
 	return out
+}
+
+// remindDelegate reads the third-party reminder delegate under the lock.
+func (d *Comp) remindDelegate() func(who, task string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.remindOther
 }

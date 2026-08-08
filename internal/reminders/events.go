@@ -113,6 +113,43 @@ func parseInstant(s string, loc *time.Location) time.Time {
 	return time.Time{}
 }
 
+// parseDayWord resolves the everyday words for a day ("today", "tomorrow",
+// "yesterday", a weekday name) to that local day. Weekday names look forward:
+// "friday" is the coming Friday, or today if today is Friday.
+func parseDayWord(s string, now time.Time) (time.Time, bool) {
+	day := func(offset int) time.Time {
+		t := now.AddDate(0, 0, offset)
+		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, now.Location())
+	}
+	switch strings.ToLower(strings.Join(strings.Fields(s), " ")) {
+	case "today", "tonight", "this evening", "this morning", "this afternoon", "rest of today", "the rest of today":
+		return day(0), true
+	case "tomorrow", "tmrw", "tomorow", "tomorrow morning", "tomorrow evening", "tomorrow night":
+		return day(1), true
+	case "yesterday":
+		return day(-1), true
+	case "day after tomorrow", "the day after tomorrow", "overmorrow":
+		return day(2), true
+	}
+	weekdays := map[string]time.Weekday{
+		"sunday": time.Sunday, "sun": time.Sunday,
+		"monday": time.Monday, "mon": time.Monday,
+		"tuesday": time.Tuesday, "tue": time.Tuesday, "tues": time.Tuesday,
+		"wednesday": time.Wednesday, "wed": time.Wednesday,
+		"thursday": time.Thursday, "thu": time.Thursday, "thur": time.Thursday, "thurs": time.Thursday,
+		"friday": time.Friday, "fri": time.Friday,
+		"saturday": time.Saturday, "sat": time.Saturday,
+	}
+	name := strings.ToLower(strings.TrimSpace(s))
+	name = strings.TrimPrefix(name, "next ")
+	name = strings.TrimPrefix(name, "this ")
+	if wd, ok := weekdays[strings.TrimSpace(name)]; ok {
+		offset := (int(wd) - int(now.Weekday()) + 7) % 7
+		return day(offset), true
+	}
+	return time.Time{}, false
+}
+
 // parseAnchor reads the moment to look around. Unlike the scheduler's parser it
 // accepts times in the past (this is a lookup, not a schedule) and reports
 // whether a clock time was actually given (date-only means "the whole day").
@@ -125,6 +162,12 @@ func parseAnchor(s string, now time.Time) (anchor time.Time, hasTime bool, err e
 		return now, true, nil
 	}
 	loc := now.Location()
+	// Day words first: these are what a person (and the chat agent relaying them)
+	// actually types. Without them "events today" was a parse error, so the agent
+	// reported an empty or unreadable schedule instead of the owner's day.
+	if t, ok := parseDayWord(s, now); ok {
+		return t, false, nil // a day word means the whole day
+	}
 	for _, layout := range []string{
 		time.RFC3339,
 		"2006-01-02T15:04:05", "2006-01-02T15:04",

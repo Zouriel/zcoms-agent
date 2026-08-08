@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Zouriel/zcoms-agent/internal/eventtime"
+	"github.com/Zouriel/zcoms-agent/internal/reminders"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
 	"github.com/Zouriel/zcoms-agent/internal/timeexpr"
@@ -294,6 +295,16 @@ func (d *Comp) applyAction(f map[string]string, transport, addr string, now time
 		if task == "" {
 			return
 		}
+		// "remind <someone else> to …" is not an entry on the owner's calendar. Filed
+		// here it became an owner event whose task named another person, and the
+		// reminder loop then greeted the owner by that person's name. Hand it to the
+		// reminders module, which resolves the contact and applies the trust gate.
+		if who, rest, ok := reminders.ThirdParty(task); ok {
+			if remind := d.remindDelegate(); remind != nil {
+				d.sendTo(transport, addr, remind(who, rest))
+				return
+			}
+		}
 		start := d.parseTimeField(f["start"], now)
 		if _, err := d.store.CreateReminder(store.Reminder{
 			FromAddr: "telegram|" + d.mainUser, FromName: "you",
@@ -438,4 +449,11 @@ func parseFields(text string) map[string]string {
 		}
 	}
 	return out
+}
+
+// remindDelegate reads the third-party reminder delegate under the lock.
+func (d *Comp) remindDelegate() func(who, task string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.remindOther
 }

@@ -163,6 +163,15 @@ func (a *Agent) buildRuntimes() error {
 		return personas.BrainWith(a.Store, persona, override)
 	}
 
+	// The schedule agents only add to the owner's own calendar, so a "remind
+	// <someone else> to …" request is handed to the reminders module instead of
+	// being filed as an owner event addressed to the wrong person.
+	remindOther := func(who, task string) string {
+		return a.Reminders.HandleCommand(a.ownerRequester(), "remind "+who+" to "+task)
+	}
+	a.Morning.SetRemindOther(remindOther)
+	a.Lineup.SetRemindOther(remindOther)
+
 	a.Bridge = bridge.New(bridge.Deps{
 		Client: a.Client, WAEnabled: settings.WhatsApp.Enabled,
 		Locations: locs, Allow: allow, Settings: settings, MainChatID: mainChat,
@@ -381,7 +390,11 @@ func triageInterval(schedule string) time.Duration {
 // so the agent never auto-replies to the owner's own outbound.
 func (a *Agent) subscribe(ctx context.Context) {
 	for ctx.Err() == nil {
-		err := a.Client.Subscribe("bridge", func(ev client.Event) {
+		// Context-aware so SIGTERM ends the read at once: a plain Subscribe blocks
+		// in its socket read until the daemon closes the connection, which it has
+		// no reason to do, so the service used to sit out its whole stop timeout
+		// and die on SIGKILL, dropping in-flight work on every deploy.
+		err := a.Client.SubscribeContext(ctx, "bridge", func(ev client.Event) {
 			if ev.FromSelf {
 				return
 			}

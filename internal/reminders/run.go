@@ -177,7 +177,7 @@ func (d *Comp) runReminder(r store.Reminder) {
 	}
 
 	// Turn 2: react to the reply (or the silence) and decide the outcome.
-	t2, _, err := d.turn(withSeed(seed, reactPrompt(r, rep, got, wait)), sess)
+	t2, _, err := d.turn(withSeed(seed, reactPrompt(r, rep, got, wait, d.ownerLabel())), sess)
 	if err != nil {
 		d.log.Printf("run #%d turn2: %v", r.ID, err)
 		r.NextAt = rfc(time.Now().Add(time.Hour))
@@ -189,7 +189,39 @@ func (d *Comp) runReminder(r store.Reminder) {
 		_ = d.sendTo(r.RecipientTransport, r.RecipientAddr, out)
 		d.store.AddReminderEvent(r.ID, "send", out)
 	}
+	d.relay(r, f2["relay"])
 	d.apply(r, f2["next"], f2["note"])
+}
+
+// relay passes a request the recipient made on to the owner. The reminder
+// conversation can only work its own task, so without this the agent either has
+// to refuse or promise something nothing will carry out; this makes "I'll pass
+// that on" true. Quoted and attributed, because it is a third party's words.
+func (d *Comp) relay(r store.Reminder, msg string) {
+	msg = strings.TrimSpace(msg)
+	if msg == "" || strings.EqualFold(msg, "none") {
+		return
+	}
+	_, chat := d.owner()
+	if chat == 0 {
+		d.log.Printf("relay #%d: no owner chat to pass it to", r.ID)
+		return
+	}
+	// A reminder the owner set for themselves needs no relay: they are the one
+	// talking, and echoing their own request back is just noise.
+	if r.RecipientTransport == "telegram" && r.RecipientAddr == itoa(chat) {
+		return
+	}
+	from := strings.TrimSpace(r.RecipientName)
+	if from == "" {
+		from = "the person you asked me to remind"
+	}
+	text := fmt.Sprintf("📨 While I was reminding %s about %s, they asked me to pass this on: %s", from, quote(r.Task), quote(msg))
+	if err := d.sendTo("telegram", itoa(chat), text); err != nil {
+		d.log.Printf("relay #%d: %v", r.ID, err)
+		return
+	}
+	d.store.AddReminderEvent(r.ID, "relay", msg)
 }
 
 // apply writes the agent's decided outcome: state + next time + carry-over.
@@ -321,6 +353,7 @@ func planPrompt(r store.Reminder, now time.Time) string {
 		"Task to get done: " + quote(r.Task),
 		"Set by: " + from + ".",
 		"You are reminding: " + recipientLabel(r) + ".",
+		"You are writing to that person and no one else. If the task text names somebody, that is a person the task is ABOUT, never the person you are messaging: do not greet or address your reader by a name taken from the task.",
 		"Right now it is " + now.Format("Mon 2006-01-02 3:04 PM") + " (local time).",
 		"Your note from last time: " + carry,
 		"",
@@ -332,7 +365,7 @@ func planPrompt(r store.Reminder, now time.Time) string {
 	}, "\n")
 }
 
-func reactPrompt(r store.Reminder, rep string, got bool, wait time.Duration) string {
+func reactPrompt(r store.Reminder, rep string, got bool, wait time.Duration, owner string) string {
 	heard := "There was no reply within " + humanDur(wait) + "."
 	if got {
 		heard = recipientLabel(r) + " replied: " + quote(rep)
@@ -341,10 +374,13 @@ func reactPrompt(r store.Reminder, rep string, got bool, wait time.Duration) str
 		fmt.Sprintf("Reminder #%d, task %s.", r.ID, quote(r.Task)),
 		heard,
 		"",
-		"Decide the outcome now. Reply EXACTLY in these three lines and nothing else:",
+		"This conversation only covers this one task. You cannot set, change, or schedule any other reminder from here, so never tell them you will remind them of something else: that is a promise nothing will keep. If they ask for anything beyond this task, say plainly that you will pass it on to " + owner + ", and put their request on the RELAY line so it actually reaches them.",
+		"",
+		"Decide the outcome now. Reply EXACTLY in these four lines and nothing else:",
 		"REPLY: an optional short message to send back now, warm and human, never using em-dashes. Or NONE.",
 		"NEXT: when to run again (relative like +1h, +1d or +2w, or absolute), or DONE if the task is complete or they made it, or CANCEL to stop reminding.",
 		"NOTE: an updated note to your future self for the next run.",
+		"RELAY: what to pass on to " + owner + " (their request, in one line), or NONE if there is nothing to pass on.",
 	}, "\n")
 }
 

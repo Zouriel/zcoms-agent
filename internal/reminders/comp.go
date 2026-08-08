@@ -80,6 +80,17 @@ func (d *Comp) owner() (string, int64) {
 	return d.mainUser, d.ownerChat
 }
 
+// ownerLabel names the owner for the recipient-facing prompts: their main_user
+// handle without the @, else a neutral word, so a relay reads "I'll pass it on
+// to Zouriel" rather than naming an address.
+func (d *Comp) ownerLabel() string {
+	user, _ := d.owner()
+	if u := strings.TrimPrefix(strings.TrimSpace(user), "@"); u != "" {
+		return u
+	}
+	return "the person who set this reminder"
+}
+
 // sendTo delivers text to a recipient on its transport.
 func (d *Comp) sendTo(transport, addr, text string) error {
 	if transport == "" {

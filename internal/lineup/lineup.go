@@ -51,6 +51,13 @@ type Comp struct {
 	// when the negotiator isn't wired (tests/headless).
 	startResch func(eventID int64, note string) string
 
+	// remindOther sets a reminder for someone who is NOT the owner and returns the
+	// reminders module's acknowledgement. The schedule agents only add to the
+	// owner's own calendar, so a "remind <someone else> to …" request has to leave
+	// here or it becomes an owner event addressed to the wrong person. nil when
+	// unwired (tests/headless), in which case the request stays on the calendar.
+	remindOther func(who, task string) string
+
 	mu        sync.Mutex
 	mainUser  string
 	ownerChat int64
@@ -73,6 +80,14 @@ func New(c commsClient, st *store.Store, mainUser string, ownerChat int64, seed 
 		mainUser:   mainUser,
 		ownerChat:  ownerChat,
 	}
+}
+
+// SetRemindOther wires the delegate that sets a reminder for a third party (the
+// reminders module, which applies its own trust gate). Safe to leave unset.
+func (d *Comp) SetRemindOther(fn func(who, task string) string) {
+	d.mu.Lock()
+	d.remindOther = fn
+	d.mu.Unlock()
 }
 
 // SetOwner updates the owner identity once the daemon resolves it.
