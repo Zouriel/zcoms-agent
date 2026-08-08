@@ -35,6 +35,8 @@ func (f *fakeClient) ResolveContact(who string) ([]client.Contact, error) {
 	return out, nil
 }
 
+func (f *fakeClient) ListContacts() ([]client.Contact, error) { return f.contacts, nil }
+
 func (f *fakeClient) lastText() string {
 	if len(f.sent) == 0 {
 		return ""

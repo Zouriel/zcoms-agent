@@ -428,6 +428,15 @@ func (a *Agent) subscribe(ctx context.Context) {
 					a.Reminders.FeedTelegram(ev.ChatID, ev.MessageID, ev.Text)
 					return
 				}
+				// `remind …` always reaches the reminders module, which passes the
+				// whole line to an agent that works out who it is for. Without this
+				// an open morning or lineup session ate the keyword and filed the
+				// request as one of the owner's own events, so "remind Raani to …"
+				// reminded the owner instead of Raani.
+				if reminders.IsCommand(ev.Text) {
+					a.Bridge.HandleEvent(ev)
+					return
+				}
 				if a.Morning.Owns(ev.ChatID) {
 					a.Morning.FeedTelegram(ev.ChatID, ev.MessageID, ev.Text)
 					return

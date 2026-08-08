@@ -55,6 +55,19 @@ func ParseRemind(text string) (who, task string, ok bool) {
 	return who, task, true
 }
 
+// IsCommand reports whether a message is a `remind …` command. The router uses it
+// to give the keyword priority over any conversation the owner happens to have
+// open: a morning or lineup session used to swallow "remind Raani to …" and file
+// it as one of the owner's own events, because those agents consume every message
+// while they are open and only the bridge routes the keyword.
+func IsCommand(text string) bool {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return false
+	}
+	return remindRe.MatchString(t)
+}
+
 // isSelf reports whether a <who> refers to the requester.
 func isSelf(who string) bool { return selfWords[norm(who)] }
 

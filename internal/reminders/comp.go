@@ -26,6 +26,7 @@ type commsClient interface {
 	MarkReadOn(transport, address string, refs []string) error // other transports
 	Resolve(to string) (int64, error)
 	ResolveContact(name string) ([]client.Contact, error)
+	ListContacts() ([]client.Contact, error)
 }
 
 // AgentTurn runs one model turn for the reminder agent: prompt in, text out, with
@@ -78,6 +79,47 @@ func (d *Comp) owner() (string, int64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.mainUser, d.ownerChat
+}
+
+// displayName is how a requester should be named in the reminder text and in the
+// messages about it. Contact resolution matches names and aliases only, never the
+// handle someone messages from, so a request from @Zoella99 was attributed to
+// "Zoella" — the reminder read "Zoella needs you to pick her up" when the
+// directory calls her Shanna. Map the handle to its contact here instead.
+func (d *Comp) displayName(req Requester) string {
+	name := strings.TrimSpace(req.Name)
+	if req.Owner {
+		return name // "you" is how the owner refers to themselves
+	}
+	handle := strings.TrimSpace(req.Handle)
+	if handle == "" {
+		return name
+	}
+	cs, err := d.client.ListContacts()
+	if err != nil {
+		return name
+	}
+	for _, c := range cs {
+		if sameHandle(c.Address(req.Transport), handle, req.Transport) {
+			if n := strings.TrimSpace(c.Name); n != "" {
+				return n
+			}
+		}
+	}
+	return name
+}
+
+// sameHandle compares two addresses on one transport: Telegram @handles are
+// case-insensitive and the @ is optional, WhatsApp compares bare digits.
+func sameHandle(a, b, transport string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	if transport == "whatsapp" {
+		return runner.WADigits(a) == runner.WADigits(b)
+	}
+	return strings.EqualFold(strings.TrimPrefix(a, "@"), strings.TrimPrefix(b, "@"))
 }
 
 // ownerLabel names the owner for the recipient-facing prompts: their main_user

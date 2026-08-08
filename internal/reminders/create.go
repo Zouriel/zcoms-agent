@@ -47,6 +47,10 @@ func (d *Comp) HandleCommand(req Requester, text string) string {
 // reminder due now — the first run is a planning run where the agent decides the
 // real timing.
 func (d *Comp) createReply(req Requester, text string) string {
+	// Name the asker as the contacts directory knows them, not by the handle they
+	// happen to message from: it goes into the task text, the confirmation, and
+	// every later message about this reminder.
+	req.Name = d.displayName(req)
 	who, task, ok := d.interpretRemind(req, text)
 	if !ok {
 		return remindUsage
@@ -131,7 +135,8 @@ func interpretPrompt(req Requester, text string) string {
 		"",
 		"Rules:",
 		"- WHO is only the person's name as they referred to them (a first name is fine), or the single word me for the asker. Never fold connecting words (\"that\", \"to\") or any of the task into WHO.",
-		"- TASK is what needs doing, phrased so it reads naturally right after the word \"to\" (for example \"come pick me up at 11:45\", \"send the invoice\"). Keep any time or place they mentioned.",
+		"- TASK is what needs doing, phrased so it reads naturally right after the word \"to\" (for example \"send the invoice\"). Keep any time or place they mentioned.",
+		"- Write TASK from the point of view of the PERSON BEING REMINDED, not the asker: where the asker said \"me\", \"my\" or \"I\" about themselves, name them instead. " + me + " asking you to remind someone \"to come pick me up at 11:45\" becomes \"come pick up " + me + " at 11:45\", because that reminder is read by somebody else.",
 		"Reply EXACTLY in these two lines and nothing else:",
 		"WHO: the name, or me",
 		"TASK: the task",
