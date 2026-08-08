@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Zouriel/zcoms-agent/internal/brains"
 	"github.com/Zouriel/zcoms-agent/internal/bridge"
 	"github.com/Zouriel/zcoms-agent/internal/morning"
 	"github.com/Zouriel/zcoms-agent/internal/personas"
@@ -61,7 +62,7 @@ func (a *Agent) dispatch(text string) (string, error) {
 // (the console). Still goes through the store — the console never opens agent.db.
 func (a *Agent) jsonQuery(args []string) (string, error) {
 	if len(args) == 0 {
-		return "", fmt.Errorf("usage: json workspaces|personas|allowlist|settings|sessions <…>")
+		return "", fmt.Errorf("usage: json workspaces|personas|allowlist|settings|brains|sessions <…>")
 	}
 	var v any
 	var err error
@@ -102,6 +103,10 @@ func (a *Agent) jsonQuery(args []string) (string, error) {
 		v = morning.LoadConfig(a.Store)
 	case "phrases":
 		v = bridge.Phrases(a.Store)
+	case "brains":
+		// Which agent CLIs are installed here and what models each accepts, read
+		// from the CLIs themselves so the console offers real choices.
+		v = brains.List()
 	case "settings":
 		v, err = a.Store.ListSettings()
 	case "sessions":
@@ -302,10 +307,15 @@ func (a *Agent) personaCmd(args []string) (string, error) {
 		return strings.TrimRight(b.String(), "\n"), nil
 	case "set", "edit":
 		// persona set <key> backend <claude|codex> | model <m> | seed <text…>
-		if len(args) < 4 {
+		// An omitted value clears the field, which is how model goes back to the
+		// CLI's own default; backend has no empty form.
+		if len(args) < 3 {
 			return "", fmt.Errorf("usage: persona set <key> backend|model|seed <value…>")
 		}
 		key, field, val := args[1], args[2], strings.Join(args[3:], " ")
+		if field == "backend" && strings.TrimSpace(val) == "" {
+			return "", fmt.Errorf("usage: persona set <key> backend claude|codex")
+		}
 		p, ok, err := a.Store.GetPersona(key)
 		if err != nil {
 			return "", err

@@ -77,6 +77,10 @@ var (
 	codexBin  = agentBin("codex")
 )
 
+// AgentBin resolves a CLI's absolute path for callers that need to run it
+// directly rather than through RunAgent (model discovery probes `claude --help`).
+func AgentBin(name string) string { return agentBin(name) }
+
 // Brain is a resolved agent identity: which CLI drives the turn and which model
 // it runs on. A zero Model means the backend's own default, so the zero Brain is
 // a usable "claude, default model".

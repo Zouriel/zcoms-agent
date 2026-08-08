@@ -26,6 +26,24 @@ type Persona struct {
 	SeedPrompt  string `json:"seed_prompt"`
 }
 
+// BrainModel is one model a backend accepts. ID is what the CLI's --model flag
+// takes; Display is the label to show.
+type BrainModel struct {
+	ID      string `json:"id"`
+	Display string `json:"display"`
+}
+
+// Brain is an agent CLI as discovered on the agent's machine: whether it is
+// installed, which models it accepts, and where that list came from. Models may
+// be empty even when installed (discovery found no catalogue) — the backend
+// still works on its own default model, and a model can be entered by hand.
+type Brain struct {
+	Name      string       `json:"name"`
+	Installed bool         `json:"installed"`
+	Models    []BrainModel `json:"models"`
+	Source    string       `json:"source"`
+}
+
 type AllowEntry struct {
 	ID       int64  `json:"id"`
 	Platform string `json:"platform"`
@@ -155,6 +173,13 @@ func (c *Client) QueryWorkspaces() ([]Workspace, error) {
 func (c *Client) QueryPersonas() ([]Persona, error) {
 	var out []Persona
 	return out, c.queryJSON("personas", &out)
+}
+
+// QueryBrains returns the agent CLIs installed on the agent's machine and the
+// models each one accepts, discovered from the CLIs themselves.
+func (c *Client) QueryBrains() ([]Brain, error) {
+	var out []Brain
+	return out, c.queryJSON("brains", &out)
 }
 
 // Allowlist returns the allowlist.
