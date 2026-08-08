@@ -77,14 +77,30 @@ var (
 	codexBin  = agentBin("codex")
 )
 
-// RunAgent runs one turn with the chosen backend. When stagingWritable is set,
+// Brain is a resolved agent identity: which CLI drives the turn and which model
+// it runs on. A zero Model means the backend's own default, so the zero Brain is
+// a usable "claude, default model".
+type Brain struct {
+	Backend Backend
+	Model   string
+}
+
+// String renders a brain for logs: "codex" or "codex/gpt-5".
+func (b Brain) String() string {
+	if b.Model == "" {
+		return string(b.Backend.normalize())
+	}
+	return string(b.Backend.normalize()) + "/" + b.Model
+}
+
+// RunAgent runs one turn with the chosen brain. When stagingWritable is set,
 // the (otherwise read-only) sandboxed agent gets dir as a writable scratch space
 // — still no network — so it can produce files to SENDFILE.
-func RunAgent(backend Backend, dir, prompt, resumeID string, role Role, stagingWritable bool) (RunResult, error) {
-	if backend.normalize() == BackendCodex {
-		return RunCodex(dir, prompt, resumeID, role, stagingWritable)
+func RunAgent(brain Brain, dir, prompt, resumeID string, role Role, stagingWritable bool) (RunResult, error) {
+	if brain.Backend.normalize() == BackendCodex {
+		return RunCodex(brain.Model, dir, prompt, resumeID, role, stagingWritable)
 	}
-	return RunClaude(dir, prompt, resumeID, role, stagingWritable)
+	return RunClaude(brain.Model, dir, prompt, resumeID, role, stagingWritable)
 }
 
 // RunResult is the outcome of one Claude turn.
@@ -143,10 +159,14 @@ func permissionArgs(role Role) []string {
 }
 
 // RunClaude runs one Claude turn in dir. If resumeID is set it continues that
-// session; otherwise it starts a new one. It returns the reply text and the
-// session id (new or unchanged) for follow-up turns.
-func RunClaude(dir, prompt, resumeID string, role Role, stagingWritable bool) (RunResult, error) {
+// session; otherwise it starts a new one. An empty model leaves the CLI's own
+// default in place. It returns the reply text and the session id (new or
+// unchanged) for follow-up turns.
+func RunClaude(model, dir, prompt, resumeID string, role Role, stagingWritable bool) (RunResult, error) {
 	args := []string{"-p", "--output-format", "json"}
+	if m := strings.TrimSpace(model); m != "" {
+		args = append(args, "--model", m)
+	}
 	if resumeID != "" {
 		args = append(args, "--resume", resumeID)
 	}

@@ -23,21 +23,21 @@ const (
 var errNoBackend = errors.New("no reschedule agent backend available")
 
 // NewAgentTurn builds the real negotiator turn: one RunAgent call on the live
-// reschedule backend in a staging dir, threading the session across messages.
-func NewAgentTurn(backendFn func() runner.Backend) AgentTurn {
+// reschedule brain (backend + model) in a staging dir, threading the session across messages.
+func NewAgentTurn(brainFn func() runner.Brain) AgentTurn {
 	dir := ""
 	if d, err := runner.DefaultAppDir(); err == nil {
 		dir = filepath.Join(d, "reschedule-staging")
 	}
 	return func(prompt, resumeID string) (string, string, error) {
-		backend := backendFn()
-		if backend == "" || dir == "" {
+		brain := brainFn()
+		if brain.Backend == "" || dir == "" {
 			return "", "", errNoBackend
 		}
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return "", "", err
 		}
-		res, err := runner.RunAgent(backend, dir, prompt, resumeID, runner.RoleRead, false)
+		res, err := runner.RunAgent(brain, dir, prompt, resumeID, runner.RoleRead, false)
 		return res.Text, res.SessionID, err
 	}
 }

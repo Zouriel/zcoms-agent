@@ -32,15 +32,15 @@ type message struct {
 
 // runOnce performs one triage pass over ALL connected transports (the legacy
 // single-schedule path / `triage now`). It delegates to runGroup with no label.
-func runOnce(c *client.Client, s runner.Settings, allow runner.Allowlist, seed string) {
-	runGroup(c, s, allow, seed, "", allTransports(s))
+func runOnce(c *client.Client, s runner.Settings, allow runner.Allowlist, seed string, brain runner.Brain) {
+	runGroup(c, s, allow, seed, "", allTransports(s), brain)
 }
 
 // runGroup performs one triage pass for a set of transports (a triage group):
 // gather unread only from those transports, drop the owner's own messages, ask
 // the agent which matter, DM the owner a digest (labeled with the group name),
 // persist the batch for `interact triage`, and mark everything read.
-func runGroup(c *client.Client, s runner.Settings, allow runner.Allowlist, seed, label string, transports map[string]bool) {
+func runGroup(c *client.Client, s runner.Settings, allow runner.Allowlist, seed, label string, transports map[string]bool, brain runner.Brain) {
 	if s.MainUser == "" || s.MainUser == "@your_username" {
 		log.Println("[triage] main_user not set — nowhere to send a digest; skipping")
 		return
@@ -63,13 +63,7 @@ func runGroup(c *client.Client, s runner.Settings, allow runner.Allowlist, seed,
 		return
 	}
 
-	agents, _, err := runner.LoadOrSeedAgents()
-	if err != nil {
-		log.Printf("[triage] couldn't load agents.json: %v", err)
-		return
-	}
-	backend := agents.For("triage", "")
-	if backend == "" {
+	if brain.Backend == "" {
 		log.Printf("[triage] %d unread message(s) but no agent (claude/codex) installed; leaving unread", len(msgs))
 		return
 	}
@@ -85,7 +79,7 @@ func runGroup(c *client.Client, s runner.Settings, allow runner.Allowlist, seed,
 	if strings.TrimSpace(seed) != "" {
 		prompt = seed + "\n\n" + prompt
 	}
-	res, runErr := runner.RunAgent(backend, s.Triage.Dir, prompt, prevID, runner.RoleRead, false)
+	res, runErr := runner.RunAgent(brain, s.Triage.Dir, prompt, prevID, runner.RoleRead, false)
 	if res.SessionID != "" {
 		saveSessionID(res.SessionID)
 	}

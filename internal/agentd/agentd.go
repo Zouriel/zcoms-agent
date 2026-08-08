@@ -113,10 +113,6 @@ func (a *Agent) buildRuntimes() error {
 	if err != nil {
 		return err
 	}
-	agents, err := a.buildAgents()
-	if err != nil {
-		return err
-	}
 	settings, err := a.buildSettings()
 	if err != nil {
 		return err
@@ -138,32 +134,39 @@ func (a *Agent) buildRuntimes() error {
 	// for `remind …` commands.
 	// The reminder agent resolves its backend live from the Reminders persona (so a
 	// console backend change applies with no restart) and runs one turn at a time.
-	remBackend := func() runner.Backend { return reminders.LiveBackend(a.Store) }
+	remBrain := func() runner.Brain { return reminders.LiveBrain(a.Store) }
 	a.Reminders = reminders.New(a.Client, a.Store, settings.MainUser, mainChat, seedFn,
-		reminders.NewAgentTurn(remBackend))
+		reminders.NewAgentTurn(remBrain))
 
 	// The morning agent runs one daily briefing, resolving its backend live from
 	// the Morning persona just like reminders.
-	morningBackend := func() runner.Backend { return morning.LiveBackend(a.Store) }
+	morningBrain := func() runner.Brain { return morning.LiveBrain(a.Store) }
 	a.Morning = morning.New(a.Client, a.Store, settings.MainUser, mainChat, seedFn,
-		morning.NewAgentTurn(morningBackend))
+		morning.NewAgentTurn(morningBrain))
 
 	// The reschedule negotiator reaches out to an event's other party on the
 	// owner's behalf; backend resolves live from the Reschedule persona.
-	rescheduleBackend := func() runner.Backend { return reschedule.LiveBackend(a.Store) }
+	rescheduleBrain := func() runner.Brain { return reschedule.LiveBrain(a.Store) }
 	a.Reschedule = reschedule.New(a.Client, a.Store, mainChat, seedFn,
-		reschedule.NewAgentTurn(rescheduleBackend))
+		reschedule.NewAgentTurn(rescheduleBrain))
 
 	// The lineup is the owner's on-demand schedule assistant: opened with the
 	// "lineup" keyword, it reads/adds/reschedules the owner's own events until they
 	// end it or go quiet. Backend resolves live from the Lineup persona.
-	lineupBackend := func() runner.Backend { return lineup.LiveBackend(a.Store) }
+	lineupBrain := func() runner.Brain { return lineup.LiveBrain(a.Store) }
 	a.Lineup = lineup.New(a.Client, a.Store, settings.MainUser, mainChat, seedFn,
-		lineup.NewAgentTurn(lineupBackend), a.Reschedule.Start)
+		lineup.NewAgentTurn(lineupBrain), a.Reschedule.Start)
+
+	// brainFn resolves a persona's backend + model from agent.db live, so a console
+	// change applies to the next turn without a restart (the seed already did).
+	brainFn := func(persona string, override runner.Backend) runner.Brain {
+		return personas.BrainWith(a.Store, persona, override)
+	}
 
 	a.Bridge = bridge.New(bridge.Deps{
 		Client: a.Client, WAEnabled: settings.WhatsApp.Enabled,
-		Locations: locs, Allow: allow, Agents: agents, Settings: settings, MainChatID: mainChat,
+		Locations: locs, Allow: allow, Settings: settings, MainChatID: mainChat,
+		AgentBrain:  brainFn,
 		PersonaSeed: seedFn, Reminders: a.Reminders,
 		// Late-bound: errands is built just below, so read it at call time (a user's
 		// errand command lands long after buildRuntimes finishes).
@@ -175,7 +178,9 @@ func (a *Agent) buildRuntimes() error {
 		},
 		Phrase: func(key string) string { return bridge.PhraseOr(a.Store, key) },
 	})
-	a.Errands = errands.New(a.Client, settings.WhatsApp.Enabled, agents, mainChat, seedFn)
+	a.Errands = errands.New(a.Client, settings.WhatsApp.Enabled,
+		func(persona string) runner.Brain { return personas.Brain(a.Store, persona) },
+		mainChat, seedFn)
 
 	// Migrate the legacy single triage schedule into a "Default" group on first
 	// run (idempotent — only seeds when no groups exist yet).
@@ -284,7 +289,7 @@ func (a *Agent) runTriageGroup(s runner.Settings, allow runner.Allowlist, seed s
 	if len(transports) == 0 {
 		return
 	}
-	triage.RunGroup(a.Client, s, allow, seed, g.Name, transports)
+	triage.RunGroup(a.Client, s, allow, seed, g.Name, transports, personas.Brain(a.Store, personas.Triage))
 	_ = a.Store.MarkTriageGroupRan(g.ID, now.UTC().Format(time.RFC3339))
 }
 
@@ -303,7 +308,7 @@ func (a *Agent) runTriageNow(s runner.Settings) {
 	}
 	if !ran {
 		// No groups configured/enabled — fall back to an all-sources pass.
-		triage.RunOnce(a.Client, s, allow, seed)
+		triage.RunOnce(a.Client, s, allow, seed, personas.Brain(a.Store, personas.Triage))
 	}
 }
 

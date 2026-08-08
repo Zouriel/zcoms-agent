@@ -5,7 +5,7 @@ import (
 )
 
 // The bridge/triage/errands runtimes were written against the runner's JSON
-// config types (Allowlist, Locations, AgentConfig, Settings). agent.db is now
+// config types (Allowlist, Locations, Settings). agent.db is now
 // the source of truth, so these adapters project the store into those types —
 // the existing runtimes work unchanged, reading live data instead of JSON.
 
@@ -41,18 +41,6 @@ func (a *Agent) buildLocations() (runner.Locations, error) {
 		out[name] = runner.LocationConfig{Path: w.Path, MaxRole: runner.Role(w.MaxRole)}
 	}
 	return out, nil
-}
-
-func (a *Agent) buildAgents() (runner.AgentConfig, error) {
-	cfg := runner.AgentConfig{Tasks: map[string]runner.Backend{}}
-	personas, err := a.Store.ListPersonas()
-	if err != nil {
-		return cfg, err
-	}
-	for _, p := range personas {
-		cfg.Tasks[p.Key] = runner.Backend(p.Backend)
-	}
-	return cfg, nil
 }
 
 func (a *Agent) buildSettings() (runner.Settings, error) {

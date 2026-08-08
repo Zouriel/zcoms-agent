@@ -21,23 +21,23 @@ var errNoBackend = errors.New("no lineup agent backend available")
 func ensureDir(dir string) error { return os.MkdirAll(dir, 0o700) }
 
 // NewAgentTurn builds the real lineup turn: one RunAgent call on the live lineup
-// backend in a staging dir, threading the session across messages. The role is
+// brain (backend + model) in a staging dir, threading the session across messages. The role is
 // read-only: the lineup never needs the filesystem, its schedule writes go
 // through the store in code, not through the agent.
-func NewAgentTurn(backendFn func() runner.Backend) AgentTurn {
+func NewAgentTurn(brainFn func() runner.Brain) AgentTurn {
 	dir := ""
 	if d, err := runner.DefaultAppDir(); err == nil {
 		dir = filepath.Join(d, "lineup-staging")
 	}
 	return func(prompt, resumeID string) (string, string, error) {
-		backend := backendFn()
-		if backend == "" || dir == "" {
+		brain := brainFn()
+		if brain.Backend == "" || dir == "" {
 			return "", "", errNoBackend
 		}
 		if err := ensureDir(dir); err != nil {
 			return "", "", err
 		}
-		res, err := runner.RunAgent(backend, dir, prompt, resumeID, runner.RoleRead, false)
+		res, err := runner.RunAgent(brain, dir, prompt, resumeID, runner.RoleRead, false)
 		return res.Text, res.SessionID, err
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/reminders"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms/client"
@@ -16,9 +17,13 @@ type Deps struct {
 	WAEnabled  bool
 	Locations  runner.Locations
 	Allow      runner.Allowlist
-	Agents     runner.AgentConfig
 	Settings   runner.Settings
 	MainChatID int64
+	// AgentBrain resolves a persona's backend + model from agent.db, read live per
+	// turn so a console edit applies with no restart. override pins one CLI (an
+	// allow-listed user's agent). May be nil, then every session runs on whichever
+	// CLI is installed, claude first.
+	AgentBrain func(persona string, override runner.Backend) runner.Brain
 	// PersonaSeed returns a persona's owner-editable seed prompt (from agent.db),
 	// read live per call so console edits take effect without a restart. May be nil.
 	PersonaSeed func(key string) string
@@ -35,24 +40,36 @@ type Deps struct {
 
 // New builds the interactive bridge runtime for the unified agent process.
 func New(d Deps) *Comp {
-	return &Comp{
-		client:           d.Client,
-		waEnabled:        d.WAEnabled,
-		bridgeBackend:    d.Agents.For("bridge", ""),
-		chatBackend:      d.Agents.For("chat", ""),
-		triageBackend:    d.Agents.For("triage", ""),
-		workspaceBackend: d.Agents.For("workspace", ""),
-		locations:        d.Locations,
-		allow:            d.Allow,
-		agents:           d.Agents,
-		settings:         d.Settings,
-		mainChatID:       d.MainChatID,
-		personaSeed:      d.PersonaSeed,
-		reminders:        d.Reminders,
-		errandCmd:        d.ErrandCmd,
-		phrase:           d.Phrase,
-		byUser:           map[string]*userState{},
+	brain := d.AgentBrain
+	if brain == nil {
+		// No resolver wired (tests / headless): fall back to any installed CLI.
+		brain = func(string, runner.Backend) runner.Brain {
+			return runner.Brain{Backend: runner.DefaultAgent()}
+		}
 	}
+	return &Comp{
+		client:      d.Client,
+		waEnabled:   d.WAEnabled,
+		locations:   d.Locations,
+		allow:       d.Allow,
+		settings:    d.Settings,
+		mainChatID:  d.MainChatID,
+		personaSeed: d.PersonaSeed,
+		agentBrain:  brain,
+		reminders:   d.Reminders,
+		errandCmd:   d.ErrandCmd,
+		phrase:      d.Phrase,
+		byUser:      map[string]*userState{},
+	}
+}
+
+// brain resolves the backend + model for a session's persona, defaulting to the
+// bridge persona when the session has not picked one (plain chat / no location).
+func (d *Comp) brain(persona string, override Backend) Brain {
+	if strings.TrimSpace(persona) == "" {
+		persona = personas.Bridge
+	}
+	return d.agentBrain(persona, override)
 }
 
 // HandleEvent dispatches one allow-listed user's incoming message (the agent's
@@ -119,7 +136,8 @@ func (d *Comp) stateFor(ev client.Event) *userState {
 		entry:     entry,
 		transport: tp,
 		address:   address,
-		backend:   d.agents.For("bridge", entry.Agent),
+		// persona stays "" until a location/chat/triage session is picked: the
+		// bridge persona governs an unscoped session, resolved live per turn.
 	}
 	d.byUser[key] = st
 	return st

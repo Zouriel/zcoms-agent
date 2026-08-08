@@ -357,8 +357,8 @@ func (d *Comp) errandStatus(e *Errand) string {
 // runInterviewTurn runs one interviewer turn (plan mode — no filesystem/shell)
 // and acts on its directives. Returns true when the interviewer hands off.
 func (d *Comp) runInterviewTurn(e *Errand, prompt string) (handoff bool) {
-	backend := d.agents.For("errands", "")
-	if backend == "" {
+	brain := d.agentBrain(personas.ErrandInterviewer)
+	if brain.Backend == "" {
 		d.logErrand(e, errandLogInterviewer, "failed", "no agent CLI configured")
 		d.send(e.OwnerChat, fmt.Sprintf("⚠️ Errand %s can't run — no agent CLI (claude/codex) is installed.", e.ID))
 		d.setErrandStatus(e, ErrandFailed)
@@ -376,10 +376,10 @@ func (d *Comp) runInterviewTurn(e *Errand, prompt string) (handoff bool) {
 	if e.InterviewSessionID == "" {
 		send = withSeed(d.seed(personas.ErrandInterviewer), buildInterviewerSeed(e)) + "\n\n" + prompt
 	}
-	d.logErrand(e, errandLogInterviewer, "agent_start", "backend=%s session=%q writable=false prompt=%q", backend, e.InterviewSessionID, snippet(prompt, 1200))
+	d.logErrand(e, errandLogInterviewer, "agent_start", "brain=%s session=%q writable=false prompt=%q", brain, e.InterviewSessionID, snippet(prompt, 1200))
 	// runner.RoleRead + non-writable staging = plan mode: the interviewer cannot write
 	// files or run commands. Its only persistent output is the one file below.
-	res, err := runner.RunAgent(backend, staging, send, e.InterviewSessionID, runner.RoleRead, false)
+	res, err := runner.RunAgent(brain, staging, send, e.InterviewSessionID, runner.RoleRead, false)
 	if res.SessionID != "" {
 		e.InterviewSessionID = res.SessionID
 	}
@@ -519,8 +519,8 @@ const (
 // runGuardTurn runs one guard turn (read-only plan mode, like the interviewer)
 // and interprets its verdict. It never writes files or runs commands.
 func (d *Comp) runGuardTurn(e *Errand, prompt string) guardVerdict {
-	backend := d.agents.For("errands", "")
-	if backend == "" {
+	brain := d.agentBrain(personas.Guard)
+	if brain.Backend == "" {
 		d.logErrand(e, errandLogGuard, "failed", "no agent CLI configured")
 		d.send(e.OwnerChat, fmt.Sprintf("⚠️ Errand %s can't run the guard — no agent CLI (claude/codex) is installed.", e.ID))
 		d.setErrandStatus(e, ErrandFailed)
@@ -538,10 +538,10 @@ func (d *Comp) runGuardTurn(e *Errand, prompt string) guardVerdict {
 	if e.GuardSessionID == "" {
 		send = withSeed(d.seed(personas.Guard), buildGuardSeed(e)) + "\n\n" + prompt
 	}
-	d.logErrand(e, errandLogGuard, "agent_start", "backend=%s session=%q writable=false prompt=%q", backend, e.GuardSessionID, snippet(prompt, 1200))
+	d.logErrand(e, errandLogGuard, "agent_start", "brain=%s session=%q writable=false prompt=%q", brain, e.GuardSessionID, snippet(prompt, 1200))
 	// RoleRead + non-writable staging = plan mode: the guard can read the
 	// collected-info file but cannot write or run anything.
-	res, err := runner.RunAgent(backend, staging, send, e.GuardSessionID, runner.RoleRead, false)
+	res, err := runner.RunAgent(brain, staging, send, e.GuardSessionID, runner.RoleRead, false)
 	if res.SessionID != "" {
 		e.GuardSessionID = res.SessionID
 	}
@@ -636,15 +636,15 @@ func (d *Comp) beginGuarding(e *Errand) {
 // runWorkerTurn runs one producer turn (full permissions in its scratch dir) and
 // acts on its directives. Returns true when the errand is finished.
 func (d *Comp) runWorkerTurn(e *Errand, prompt string) (done bool) {
-	backend := d.agents.For("errands", "")
+	brain := d.agentBrain(personas.ErrandProducer)
 	// The producer runs with full permissions to render deliverables (e.g. HTML to
 	// PDF via a headless browser) and use whatever tools it needs. codex's sandbox
 	// blocks launching a browser and reading fonts/templates outside the scratch
-	// dir, so when the configured errands backend is codex, run the PRODUCER on
-	// claude if it is installed. The interviewer and guard stay on the configured
-	// backend (they only chat / inspect and never need the render toolchain).
-	if backend == runner.BackendCodex && runner.AgentAvailable(runner.BackendClaude) {
-		backend = runner.BackendClaude
+	// dir, so when the producer persona is on codex, run it on claude if that is
+	// installed. The interviewer and guard keep their own personas' backends (they
+	// only chat / inspect and never need the render toolchain).
+	if brain.Backend == runner.BackendCodex && runner.AgentAvailable(runner.BackendClaude) {
+		brain = runner.Brain{Backend: runner.BackendClaude}
 	}
 	staging, err := errandStagingDir(e.ID)
 	if err != nil {
@@ -658,11 +658,11 @@ func (d *Comp) runWorkerTurn(e *Errand, prompt string) (done bool) {
 	if e.WorkerSessionID == "" {
 		send = withSeed(d.seed(personas.ErrandProducer), buildWorkerSeed(e)) + "\n\n" + prompt
 	}
-	d.logErrand(e, errandLogProducer, "agent_start", "backend=%s session=%q role=full prompt=%q", backend, e.WorkerSessionID, snippet(prompt, 1200))
+	d.logErrand(e, errandLogProducer, "agent_start", "brain=%s session=%q role=full prompt=%q", brain, e.WorkerSessionID, snippet(prompt, 1200))
 	// runner.RoleFull = --dangerously-skip-permissions: the producer has full
 	// filesystem + shell access, its cwd being the private scratch dir. The guard
 	// vetted the collected info before this point, which is what licenses full perms.
-	res, err := runner.RunAgent(backend, staging, send, e.WorkerSessionID, runner.RoleFull, false)
+	res, err := runner.RunAgent(brain, staging, send, e.WorkerSessionID, runner.RoleFull, false)
 	if res.SessionID != "" {
 		e.WorkerSessionID = res.SessionID
 	}

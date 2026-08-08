@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms/client"
 )
 
@@ -13,8 +14,8 @@ func testComp() *Comp {
 			"telegram|@alice":     {Role: RoleRead},
 			"whatsapp|9607654321": {Role: RoleRead},
 		},
-		agents: AgentConfig{},
-		byUser: map[string]*userState{},
+		agentBrain: func(string, Backend) Brain { return Brain{Backend: BackendClaude} },
+		byUser:     map[string]*userState{},
 	}
 }
 
@@ -124,5 +125,38 @@ func TestSessionKeyNamespacesTransports(t *testing.T) {
 	}
 	if sessionKey("", "5") != sessionKey("telegram", "5") {
 		t.Fatal("empty transport must default to telegram")
+	}
+}
+
+// A `chat` session must run on the bridge persona: the row whose seed it already
+// uses, and whose backend/model the console shows for it. Asking for a task name
+// no persona provides is what made a console-set codex chat run on claude.
+func TestChatSessionRunsOnTheBridgePersona(t *testing.T) {
+	d := testComp()
+	d.client = &client.Client{} // sends fail (dead socket) and are ignored
+	var asked []string
+	d.agentBrain = func(persona string, _ Backend) Brain {
+		asked = append(asked, persona)
+		return Brain{Backend: BackendCodex}
+	}
+
+	st := d.stateFor(client.Event{Sender: "@alice", UserID: 42, ChatID: 42, Address: "42"})
+	if st == nil {
+		t.Fatal("setup: allow-listed sender should get a session")
+	}
+	// A session with no location resolves as the bridge persona.
+	if got := d.brain(st.persona, ""); got.Backend != BackendCodex {
+		t.Fatalf("unscoped session brain = %+v, want the persona's codex", got)
+	}
+	d.startChat(st)
+	if st.persona != personas.Bridge {
+		t.Fatalf("chat session persona = %q, want %q", st.persona, personas.Bridge)
+	}
+	d.brain(st.persona, "") // what the next turn would resolve
+	if last := asked[len(asked)-1]; last != personas.Bridge {
+		t.Fatalf("chat turn resolved persona %q, want %q", last, personas.Bridge)
+	}
+	if asked[0] != personas.Bridge {
+		t.Fatalf("unscoped session resolved persona %q, want %q", asked[0], personas.Bridge)
 	}
 }

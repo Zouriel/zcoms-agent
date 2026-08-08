@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Zouriel/zcoms-agent/internal/personas"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
 	"github.com/Zouriel/zcoms/client"
@@ -266,13 +267,7 @@ func (d *Comp) waitReply(transport, addr string, wait time.Duration) (string, bo
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
-// LiveBackend resolves the reschedule task's backend from the persona rows live.
-func LiveBackend(st *store.Store) runner.Backend {
-	cfg := runner.AgentConfig{Tasks: map[string]runner.Backend{}}
-	if ps, err := st.ListPersonas(); err == nil {
-		for _, p := range ps {
-			cfg.Tasks[p.Key] = runner.Backend(p.Backend)
-		}
-	}
-	return cfg.For("reschedule", "")
+// LiveBrain resolves the negotiator's backend + model from its persona row live.
+func LiveBrain(st *store.Store) runner.Brain {
+	return personas.Brain(st, personas.Reschedule)
 }

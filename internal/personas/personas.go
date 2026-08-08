@@ -8,8 +8,10 @@ package personas
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
+	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
 )
 
@@ -187,6 +189,46 @@ func UpgradeDefaults(s *store.Store) error {
 		}
 	}
 	return nil
+}
+
+// Brain resolves which CLI and model a persona runs on, read live from agent.db
+// so a console edit applies to the next turn with no restart. It is the single
+// place backend/model selection happens: pass the persona key that owns the run
+// (the same key whose seed you prepend), never an ad-hoc task name. A zero
+// Backend means no agent CLI is installed at all — callers must check that.
+func Brain(s *store.Store, key string) runner.Brain {
+	return BrainWith(s, key, "")
+}
+
+// BrainWith resolves like Brain but lets an explicit override win over the
+// persona's own backend (an allow-listed user can pin their sessions to one CLI).
+func BrainWith(s *store.Store, key string, override runner.Backend) runner.Brain {
+	cfg := runner.AgentConfig{Tasks: map[string]runner.Backend{}}
+	var want runner.Backend
+	var model string
+	if ps, err := s.ListPersonas(); err == nil {
+		for _, p := range ps {
+			cfg.Tasks[p.Key] = runner.Backend(p.Backend)
+			if p.Key == key {
+				want, model = runner.Backend(strings.ToLower(p.Backend)), strings.TrimSpace(p.Model)
+			}
+		}
+	}
+	if want == "" {
+		// No row for this key: For would silently fall back to whatever is installed,
+		// which is how a session ends up on a CLI the console never chose. Say so.
+		log.Printf("[personas] no persona row for %q; falling back to the installed default", key)
+	}
+	got := cfg.For(key, override)
+	if got == "" {
+		return runner.Brain{} // no claude and no codex installed
+	}
+	// A model name belongs to one CLI (opus is not a codex model), so keep it only
+	// when the run actually landed on the backend the persona asked for.
+	if got != want {
+		model = ""
+	}
+	return runner.Brain{Backend: got, Model: model}
 }
 
 // SeedOr returns a persona's seed prompt from the store, falling back to the

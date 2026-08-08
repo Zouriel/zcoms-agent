@@ -27,10 +27,18 @@ type userState struct {
 
 	location      string // active location name ("" = none picked)
 	locationPath  string
-	effectiveRole Role    // user role capped by the location's max_role
-	backend       Backend // resolved agent backend ("" = none installed)
-	forceBackend  Backend // per-session backend override (e.g. `chat` pins codex); "" = use backend
-	sessionID     string  // active agent session ("" = will start fresh)
+	effectiveRole Role   // user role capped by the location's max_role
+	sessionID     string // active agent session ("" = will start fresh)
+	// sessionBackend is the CLI that issued sessionID. Session ids are not
+	// portable between claude and codex, so a resume is only valid on the same
+	// backend; when the persona's backend changes under an open session the id is
+	// dropped and a fresh one starts.
+	sessionBackend Backend
+	// persona is the key whose row governs this session: `workspace` for a
+	// location session, `triage` for interactive triage, `bridge` (the default,
+	// "") for chat and an unscoped session. Its backend + model are resolved live
+	// per turn, so a console edit applies to the next message with no restart.
+	persona string
 
 	pendingKind     string    // "location" | "session" | ""
 	pendingLoc      []string  // location names awaiting numeric pick
@@ -142,7 +150,7 @@ func (d *Comp) handle(st *userState, text string) {
 		d.mu.Lock()
 		st.sessionID, st.pendingKind, st.awaitingConfirm = "", "", false
 		st.triageReply, st.triageRecipients, st.triageSeed, st.triageSession = false, nil, "", false
-		st.forceBackend = ""
+		st.persona = ""
 		d.mu.Unlock()
 		d.send(st.route(), "Detached. Send 'locations' to pick where to work.")
 		return
@@ -294,10 +302,9 @@ func (d *Comp) selectNumber(st *userState, n int) {
 		st.location, st.locationPath, st.effectiveRole = name, cfg.Path, role
 		st.sessionID, st.pendingKind, st.awaitingConfirm = "", "", false
 		// A coding/location session is governed by the `workspace` persona: its
-		// backend drives the session and its (owner-editable) seed is prepended to
-		// the first turn in this repo. A per-user agent override still wins.
-		st.backend = d.agents.For(personas.Workspace, st.entry.Agent)
-		st.forceBackend = ""
+		// backend + model drive the session and its (owner-editable) seed is
+		// prepended to the first turn in this repo.
+		st.persona = personas.Workspace
 		st.triageSeed = d.seed(personas.Workspace)
 		d.mu.Unlock()
 		d.send(st.route(), fmt.Sprintf("📍 %s (%s)\nRole here: %s\nSend 'resume' to continue a past session, or just send a message to start a new one.", name, cfg.Path, role))
@@ -310,7 +317,8 @@ func (d *Comp) selectNumber(st *userState, n int) {
 		sess := pendingSess[n-1]
 		d.mu.Lock()
 		st.sessionID, st.pendingKind = sess.ID, ""
-		st.triageSeed = "" // resuming an established session — don't re-seed it
+		st.sessionBackend = "" // listed from disk: resume it as-is, don't guess its CLI
+		st.triageSeed = ""     // resuming an established session — don't re-seed it
 		d.mu.Unlock()
 		d.send(st.route(), fmt.Sprintf("↩️ Resuming: %s\nFetching a summary…", sess.Title))
 		d.runAgent(st, "Briefly summarize in 2-4 sentences what we were last working on in this conversation and what the current state / next step is. Don't take any actions.", RoleRead, false)
@@ -335,7 +343,9 @@ func (d *Comp) startChat(st *userState) {
 	st.location, st.locationPath, st.effectiveRole = "chat", home, st.entry.Role
 	st.sessionID, st.pendingKind, st.awaitingConfirm = "", "", false
 	st.triageReply, st.triageSession, st.triageRecipients = false, false, nil
-	st.forceBackend = d.chatBackend // explicit chat can use a different backend than location sessions
+	// Chat is the `bridge` persona: same row that supplies the seed below, so the
+	// console's backend/model for it actually drives the session.
+	st.persona = personas.Bridge
 	st.triageSeed = d.seed(personas.Bridge)
 	role := st.effectiveRole
 	d.mu.Unlock()
@@ -370,26 +380,33 @@ func (d *Comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAft
 		return false // a run is already in flight; don't start a second
 	}
 	st.busy = true
-	backend := st.backend
 	dir, resume, rt := st.locationPath, st.sessionID, st.route()
 	triageReply := st.triageReply
 	triageSession := st.triageSession
 	recipients := st.triageRecipients
-	// Backend precedence: an explicit per-session override (e.g. `chat` pins
-	// codex) wins; otherwise interactive-triage runs on the triage backend so it
-	// can resume the codex triage brain; otherwise the user's default backend.
-	if st.forceBackend != "" {
-		backend = st.forceBackend
-	} else if triageReply && d.triageBackend != "" {
-		backend = d.triageBackend
-	}
+	persona, pinned, sessBackend := st.persona, st.entry.Agent, st.sessionBackend
 	d.mu.Unlock()
-	if backend == "" {
+	// The session's persona decides which CLI and model run the turn, read live so
+	// a console edit lands on the next message (resolved outside the session mutex
+	// because it reads agent.db). A per-user pinned agent still wins.
+	brain := d.brain(persona, pinned)
+	if brain.Backend == "" {
 		d.mu.Lock()
 		st.busy = false
 		d.mu.Unlock()
 		d.send(rt, "⚠️ Agent mode is unavailable — no `claude` or `codex` CLI is installed.")
 		return true // turn consumed (nothing to retry)
+	}
+
+	// The backend changed under an open session (the owner edited the persona in
+	// the console): the other CLI cannot resume this thread, so start a fresh one
+	// and say so rather than failing the turn on an unknown session id.
+	if resume != "" && sessBackend != "" && sessBackend != brain.Backend {
+		d.mu.Lock()
+		st.sessionID, st.sessionBackend = "", ""
+		d.mu.Unlock()
+		resume = ""
+		d.send(rt, fmt.Sprintf("🔀 Switched to %s — starting a fresh session (the previous one can't carry over).", brain))
 	}
 
 	if awaitConfirmAfter {
@@ -431,7 +448,7 @@ func (d *Comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAft
 			}
 			curSession = r.SessionID
 			d.mu.Lock()
-			st.sessionID = r.SessionID
+			st.sessionID, st.sessionBackend = r.SessionID, brain.Backend
 			d.mu.Unlock()
 			if triageSession {
 				_ = SaveTriageSessionID(r.SessionID)
@@ -447,7 +464,7 @@ func (d *Comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAft
 			}
 		}
 
-		res, err := RunAgent(backend, runDir, prompt, resume, role, stagingWritable)
+		res, err := RunAgent(brain, runDir, prompt, resume, role, stagingWritable)
 		recordSession(res)
 
 		// Triage/chat agents are sandboxed and can't reach Telegram. When the agent
@@ -461,7 +478,7 @@ func (d *Comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAft
 				}
 				d.send(rt, "🔎 reading…")
 				feedback := d.runTriageReads(reads)
-				res, err = RunAgent(backend, runDir, feedback, curSession, role, stagingWritable)
+				res, err = RunAgent(brain, runDir, feedback, curSession, role, stagingWritable)
 				recordSession(res)
 				if err != nil {
 					break
@@ -470,7 +487,7 @@ func (d *Comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAft
 			// If the agent still wants to read after the cap, it would otherwise
 			// answer referencing history it never received. Tell it to wrap up.
 			if err == nil && len(parseReadDirectives(res.Text)) > 0 {
-				res, err = RunAgent(backend, runDir,
+				res, err = RunAgent(brain, runDir,
 					"Read limit reached for this turn — no more chats can be fetched now. "+
 						"Answer the owner using only what you already have (or SEND if asked).",
 					curSession, role, stagingWritable)
@@ -512,7 +529,6 @@ func (d *Comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAft
 
 func (d *Comp) statusLine(st *userState) string {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	loc := st.location
 	if loc == "" {
 		loc = "(none)"
@@ -525,7 +541,11 @@ func (d *Comp) statusLine(st *userState) string {
 	if st.location != "" {
 		role = st.effectiveRole
 	}
-	return fmt.Sprintf("Role: %s\nLocation: %s\nSession: %s", role, loc, sess)
+	persona, pinned := st.persona, st.entry.Agent
+	d.mu.Unlock()
+	// Report the brain too: a session silently running on a different CLI/model
+	// than the console shows is otherwise invisible from the chat side.
+	return fmt.Sprintf("Role: %s\nLocation: %s\nSession: %s\nAgent: %s", role, loc, sess, d.brain(persona, pinned))
 }
 
 func (d *Comp) helpText(st *userState) string {

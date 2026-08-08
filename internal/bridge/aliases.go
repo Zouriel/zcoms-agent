@@ -15,13 +15,13 @@ import (
 type (
 	Role           = runner.Role
 	Backend        = runner.Backend
+	Brain          = runner.Brain
 	AllowEntry     = runner.AllowEntry
 	Allowlist      = runner.Allowlist
 	Locations      = runner.Locations
 	LocationConfig = runner.LocationConfig
 	Session        = runner.Session
 	RunResult      = runner.RunResult
-	AgentConfig    = runner.AgentConfig
 	Settings       = runner.Settings
 	TriageSettings = runner.TriageSettings
 )

@@ -4,7 +4,10 @@ import (
 	"os/exec"
 )
 
-// AgentConfig selects which backend handles which task (agents.json).
+// AgentConfig selects which backend handles which task. It is the legacy
+// agents.json shape, kept for the one-time import into agent.db: at runtime the
+// persona rows are the source of truth and the task keys ARE persona keys, so
+// resolve through personas.Brain rather than building a config here.
 //
 //	{
 //	  "default": "claude",          // all bridge work / anything unspecified
@@ -16,20 +19,6 @@ type AgentConfig struct {
 }
 
 const agentsFile = "agents.json"
-
-// SessionTypes are the agents.json task keys, one per kind of agent session, so
-// each can run a different backend (`zc agents set <type> <claude|codex>`).
-var SessionTypes = []string{"bridge", "triage", "errands", "reminders", "morning", "reschedule", "lineup"}
-
-// IsSessionType reports whether s is a known session type.
-func IsSessionType(s string) bool {
-	for _, t := range SessionTypes {
-		if t == s {
-			return true
-		}
-	}
-	return false
-}
 
 // AgentAvailable reports whether the backend's CLI is installed.
 func AgentAvailable(b Backend) bool {

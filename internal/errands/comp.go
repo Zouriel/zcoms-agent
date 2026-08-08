@@ -21,8 +21,10 @@ type Comp struct {
 	client      *client.Client
 	waEnabled   bool
 	ownerChat   int64
-	agents      runner.AgentConfig
 	personaSeed func(key string) string // owner-editable persona scaffolds (agent.db)
+	// agentBrain resolves a persona's live backend + model from agent.db. Each of
+	// the three errand agents has its own persona row, so they can differ.
+	agentBrain func(persona string) runner.Brain
 
 	mu         sync.Mutex
 	errands    map[string]*Errand

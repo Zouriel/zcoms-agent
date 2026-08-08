@@ -19,21 +19,19 @@ import (
 // Comp is the bridge component's runtime. It owns the interactive per-user
 // session state and reaches Telegram through the core daemon over IPC.
 type Comp struct {
-	client           *client.Client
-	waEnabled        bool
-	bridgeBackend    Backend
-	chatBackend      Backend
-	triageBackend    Backend
-	workspaceBackend Backend
-	locations        Locations
-	allow            Allowlist
-	agents           AgentConfig
-	settings         Settings
-	mainChatID       int64
-	personaSeed      func(key string) string
-	reminders        *reminders.Comp          // in-process reminder loop (may be nil)
-	errandCmd        func(text string) string // in-process errands command handler (may be nil)
-	phrase           func(key string) string  // editable canned messages (may be nil)
+	client      *client.Client
+	waEnabled   bool
+	locations   Locations
+	allow       Allowlist
+	settings    Settings
+	mainChatID  int64
+	personaSeed func(key string) string
+	// agentBrain resolves a persona's live backend + model from agent.db (an
+	// override pins one CLI). Never nil after New.
+	agentBrain func(persona string, override Backend) Brain
+	reminders  *reminders.Comp          // in-process reminder loop (may be nil)
+	errandCmd  func(text string) string // in-process errands command handler (may be nil)
+	phrase     func(key string) string  // editable canned messages (may be nil)
 
 	mu       sync.Mutex
 	triageMu sync.Mutex

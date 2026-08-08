@@ -15,20 +15,20 @@ import (
 )
 
 // NewAgentTurn builds the real reminder-agent turn: one RunAgent call on the live
-// reminders backend in a staging dir. resumeID threads the two turns of a run so
+// reminders brain (backend + model) in a staging dir. resumeID threads the two turns of a run so
 // the agent remembers, within a run, what it just sent.
-func NewAgentTurn(backendFn func() runner.Backend) AgentTurn {
+func NewAgentTurn(brainFn func() runner.Brain) AgentTurn {
 	dir := ""
 	if d, err := runner.DefaultAppDir(); err == nil {
 		dir = filepath.Join(d, "reminders-staging")
 		_ = os.MkdirAll(dir, 0o700)
 	}
 	return func(prompt, resumeID string) (string, string, error) {
-		backend := backendFn()
-		if backend == "" || dir == "" {
+		brain := brainFn()
+		if brain.Backend == "" || dir == "" {
 			return "", "", fmt.Errorf("no reminder agent backend available")
 		}
-		res, err := runner.RunAgent(backend, dir, prompt, resumeID, runner.RoleRead, false)
+		res, err := runner.RunAgent(brain, dir, prompt, resumeID, runner.RoleRead, false)
 		return res.Text, res.SessionID, err
 	}
 }

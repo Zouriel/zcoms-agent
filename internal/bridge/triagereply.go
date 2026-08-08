@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Zouriel/zcoms-agent/internal/personas"
 )
 
 // sendDirective matches a single reply instruction emitted by the interactive
@@ -138,11 +140,12 @@ func (d *Comp) startTriageReply(st *userState) {
 	d.mu.Lock()
 	st.location, st.locationPath, st.effectiveRole = "triage", dir, RoleRead
 	st.sessionID, st.pendingKind, st.awaitingConfirm = brainID, "", false
+	st.sessionBackend = "" // the shared triage brain is resumed as-is
 	st.triageReply = true
 	st.triageSession = true // this turn drives the shared triage brain
 	st.triageRecipients = batch.Recipients
 	st.triageSeed = buildTriageSeed(batch.Recipients)
-	st.forceBackend = "" // triage uses the triage backend via the triageReply path
+	st.persona = personas.Triage // resumes the triage brain, so run it on triage's own backend
 	d.mu.Unlock()
 
 	memory := "resuming triage memory"

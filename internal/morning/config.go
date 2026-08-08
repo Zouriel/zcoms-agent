@@ -31,22 +31,22 @@ func LoadConfig(st *store.Store) Config {
 }
 
 // NewAgentTurn builds the real morning-agent turn: one RunAgent call on the live
-// morning backend in a staging dir. resumeID threads the turns of a briefing so
+// morning brain (backend + model) in a staging dir. resumeID threads the turns of a briefing so
 // the agent remembers what it already said this morning.
-func NewAgentTurn(backendFn func() runner.Backend) AgentTurn {
+func NewAgentTurn(brainFn func() runner.Brain) AgentTurn {
 	dir := ""
 	if d, err := runner.DefaultAppDir(); err == nil {
 		dir = filepath.Join(d, "morning-staging")
 	}
 	return func(prompt, resumeID string) (string, string, error) {
-		backend := backendFn()
-		if backend == "" || dir == "" {
+		brain := brainFn()
+		if brain.Backend == "" || dir == "" {
 			return "", "", errNoBackend
 		}
 		if err := ensureDir(dir); err != nil {
 			return "", "", err
 		}
-		res, err := runner.RunAgent(backend, dir, prompt, resumeID, runner.RoleRead, false)
+		res, err := runner.RunAgent(brain, dir, prompt, resumeID, runner.RoleRead, false)
 		return res.Text, res.SessionID, err
 	}
 }

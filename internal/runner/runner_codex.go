@@ -22,8 +22,9 @@ func codexSandboxArgs(role Role) []string {
 }
 
 // RunCodex runs one Codex turn (new session or resume) and returns the final
-// message plus the thread/session id for follow-ups.
-func RunCodex(dir, prompt, resumeID string, role Role, stagingWritable bool) (RunResult, error) {
+// message plus the thread/session id for follow-ups. An empty model leaves the
+// CLI's own default in place.
+func RunCodex(model, dir, prompt, resumeID string, role Role, stagingWritable bool) (RunResult, error) {
 	lastFile, err := os.CreateTemp("", "codex-last-*.txt")
 	if err != nil {
 		return RunResult{}, err
@@ -39,6 +40,9 @@ func RunCodex(dir, prompt, resumeID string, role Role, stagingWritable bool) (Ru
 		args = append(args, "exec")
 	}
 	args = append(args, "--json", "--skip-git-repo-check", "-o", lastPath)
+	if m := strings.TrimSpace(model); m != "" {
+		args = append(args, "--model", m)
+	}
 	switch {
 	case stagingWritable:
 		// Sandboxed triage/chat agent: dir is a writable scratch space (so it can

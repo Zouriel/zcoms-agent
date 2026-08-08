@@ -12,11 +12,16 @@ import (
 // one harness connection and routes events in; errands no longer subscribes on
 // its own (that was the standalone component's job). WhatsApp goes through the
 // daemon's in-process transport — no sidecar.
-func New(c *client.Client, waEnabled bool, agents runner.AgentConfig, ownerChat int64, personaSeed func(key string) string) *Comp {
+// agentBrain resolves each errand agent's backend + model from its own persona
+// row, read live; nil falls back to whichever CLI is installed.
+func New(c *client.Client, waEnabled bool, agentBrain func(persona string) runner.Brain, ownerChat int64, personaSeed func(key string) string) *Comp {
+	if agentBrain == nil {
+		agentBrain = func(string) runner.Brain { return runner.Brain{Backend: runner.DefaultAgent()} }
+	}
 	d := &Comp{
 		client:      c,
 		waEnabled:   waEnabled,
-		agents:      agents,
+		agentBrain:  agentBrain,
 		personaSeed: personaSeed,
 		ownerChat:   ownerChat,
 		errands:     map[string]*Errand{},
