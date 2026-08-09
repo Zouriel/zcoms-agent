@@ -451,6 +451,14 @@ func (a *Agent) triageCmd(args []string) (string, error) {
 	case "group", "groups":
 		return a.triageGroupCmd(args)
 	default:
+		// Only a real schedule may fall through to the setter. This used to accept
+		// any word at all, so a mistyped or unrecognised subcommand ("triage
+		// digest") silently replaced the schedule with itself and the scheduler
+		// then had nothing valid to run on.
+		if !runner.ValidTriageSchedule(args[0]) {
+			return "", fmt.Errorf("unknown triage command %q — expected on|off|now|group, or a schedule (%s)",
+				args[0], strings.Join(runner.TriageSchedules, ", "))
+		}
 		return "Triage schedule set (restart to apply).", a.Store.SetSetting(store.Owner, "triage_schedule", args[0])
 	}
 }

@@ -126,6 +126,25 @@ func (s *Store) UpdateReminder(r Reminder) error {
 	return nil
 }
 
+// SetReminderTask rewrites what a reminder is about.
+//
+// It is separate from UpdateReminder because that one is the per-run write from
+// the reminder agent, which must never be able to rewrite the task it was given.
+// Changing the task is an owner-facing edit and is asked for by name.
+func (s *Store) SetReminderTask(id int64, task string) error {
+	if strings.TrimSpace(task) == "" {
+		return fmt.Errorf("a reminder needs a task")
+	}
+	res, err := s.db.Exec(`UPDATE reminders SET task_text=?, updated_at=? WHERE id=?`, task, now(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("no reminder with id %d", id)
+	}
+	return nil
+}
+
 // GetReminder returns one reminder by id.
 func (s *Store) GetReminder(id int64) (Reminder, bool, error) {
 	r, err := scanReminder(s.db.QueryRow(`SELECT `+reminderCols+` FROM reminders WHERE id=?`, id))

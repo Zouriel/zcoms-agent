@@ -2,7 +2,9 @@ package reminders
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,13 +21,19 @@ const eventsWindow = 2 * time.Hour
 func (d *Comp) EventsAround(when string, now time.Time) (string, error) {
 	when = strings.TrimSpace(when)
 	if when == "" {
-		return "", fmt.Errorf("usage: events <date and time>  (e.g. events 2026-07-04 15:00)")
+		return "", fmt.Errorf("usage: events <date and time>  (e.g. events today, events this week, events 2026-07-04 15:00)")
 	}
-	anchor, hasTime, err := parseAnchor(when, now)
+	all, err := d.store.ListReminders()
 	if err != nil {
 		return "", err
 	}
-	all, err := d.store.ListReminders()
+	// Spans first: "this week" and its neighbours cover several days and cannot be
+	// expressed as a moment to look around, so they never reached a parse that
+	// understood them and came back as an error instead of the owner's week.
+	if lo, hi, label, ok := parseRange(when, now); ok {
+		return spanReport(all, lo, hi, label, true), nil
+	}
+	anchor, hasTime, err := parseAnchor(when, now)
 	if err != nil {
 		return "", err
 	}
@@ -37,16 +45,22 @@ func (d *Comp) EventsAround(when string, now time.Time) (string, error) {
 // local day of anchor.
 func eventsReport(all []store.Reminder, anchor time.Time, hasTime bool) string {
 	loc := anchor.Location()
-	var lo, hi time.Time
-	var header string
 	if hasTime {
-		lo, hi = anchor.Add(-eventsWindow), anchor.Add(eventsWindow)
-		header = "Events within 2 hours of " + anchor.Format("Mon 02 Jan 2006, 3:04 PM") + ":"
-	} else {
-		lo = time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, loc)
-		hi = lo.AddDate(0, 0, 1).Add(-time.Nanosecond)
-		header = "Events on " + anchor.Format("Mon 02 Jan 2006") + ":"
+		return spanReport(all,
+			anchor.Add(-eventsWindow), anchor.Add(eventsWindow),
+			"Events within 2 hours of "+anchor.Format("Mon 02 Jan 2006, 3:04 PM")+":", false)
 	}
+	lo := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, loc)
+	return spanReport(all,
+		lo, lo.AddDate(0, 0, 1).Add(-time.Nanosecond),
+		"Events on "+anchor.Format("Mon 02 Jan 2006")+":", false)
+}
+
+// spanReport lists every event overlapping [lo, hi] under the given header. byDay
+// groups the lines under a date heading, which is what makes a multi-day answer
+// readable; a single-day or few-hours window reads better as a flat list.
+func spanReport(all []store.Reminder, lo, hi time.Time, header string, byDay bool) string {
+	loc := lo.Location()
 
 	type hit struct {
 		start, end time.Time
@@ -72,12 +86,20 @@ func eventsReport(all []store.Reminder, anchor time.Time, hasTime bool) string {
 	}
 	var b strings.Builder
 	b.WriteString(header + "\n")
+	indent, day := "  ", ""
 	for _, h := range hits {
+		if byDay {
+			if d := h.start.Format("Mon 02 Jan"); d != day {
+				day = d
+				b.WriteString("  " + d + "\n")
+			}
+			indent = "    "
+		}
 		label := h.start.Format("3:04 PM")
 		if !h.end.Equal(h.start) {
 			label += "–" + h.end.Format("3:04 PM")
 		}
-		line := "  " + label + "  " + h.r.Task
+		line := indent + label + "  " + h.r.Task
 		if o := strings.TrimSpace(h.r.OtherParty); o != "" {
 			line += " (with " + o + ")"
 		}
@@ -148,6 +170,69 @@ func parseDayWord(s string, now time.Time) (time.Time, bool) {
 		return day(offset), true
 	}
 	return time.Time{}, false
+}
+
+// nextDaysRe matches the open-ended spans ("next 3 days", "coming 2 weeks").
+var nextDaysRe = regexp.MustCompile(`(?i)^(?:the\s+)?(?:next|coming|following)\s+(\d{1,3})\s*(day|days|week|weeks)$`)
+
+// parseRange resolves the words for a span of days to the window they cover, and
+// a header naming it. ok is false for anything that is a single moment or day,
+// which parseAnchor handles.
+//
+// Spans that include today start at today rather than at the start of the
+// calendar period: someone asking what is on this week on a Thursday wants the
+// days they still have, not a recap of Monday.
+func parseRange(s string, now time.Time) (lo, hi time.Time, label string, ok bool) {
+	loc := now.Location()
+	midnight := func(t time.Time) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+	}
+	endOf := func(t time.Time) time.Time { return midnight(t).AddDate(0, 0, 1).Add(-time.Nanosecond) }
+	today := midnight(now)
+
+	// Monday-based offset of the current day within its week.
+	intoWeek := (int(now.Weekday()) + 6) % 7
+	weekStart := today.AddDate(0, 0, -intoWeek)
+
+	named := func(lo, hi time.Time, name string) (time.Time, time.Time, string, bool) {
+		return lo, hi, fmt.Sprintf("Events %s (%s to %s):", name,
+			lo.Format("Mon 02 Jan"), hi.Format("Mon 02 Jan")), true
+	}
+
+	switch strings.ToLower(strings.Join(strings.Fields(s), " ")) {
+	case "this week", "the week", "week", "rest of the week", "rest of this week", "the rest of the week":
+		return named(today, endOf(weekStart.AddDate(0, 0, 6)), "this week")
+	case "next week", "the coming week", "coming week":
+		start := weekStart.AddDate(0, 0, 7)
+		return named(start, endOf(start.AddDate(0, 0, 6)), "next week")
+	case "last week", "the past week", "previous week":
+		start := weekStart.AddDate(0, 0, -7)
+		return named(start, endOf(start.AddDate(0, 0, 6)), "last week")
+	case "this weekend", "the weekend", "weekend", "coming weekend":
+		// The Saturday of the current week, so asking on a Sunday still means today.
+		start := weekStart.AddDate(0, 0, 5)
+		return named(start, endOf(start.AddDate(0, 0, 1)), "this weekend")
+	case "this month", "the month", "month", "rest of the month":
+		return named(today, endOf(time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, loc).AddDate(0, 0, -1)), "this month")
+	case "next month":
+		start := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, loc)
+		return named(start, endOf(start.AddDate(0, 1, -1)), "next month")
+	}
+
+	if m := nextDaysRe.FindStringSubmatch(strings.TrimSpace(s)); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err != nil || n < 1 {
+			return time.Time{}, time.Time{}, "", false
+		}
+		days := n
+		unit := "day"
+		if strings.HasPrefix(strings.ToLower(m[2]), "week") {
+			days, unit = n*7, "week"
+		}
+		return named(today, endOf(today.AddDate(0, 0, days-1)), fmt.Sprintf("in the next %d %s(s)", n, unit))
+	}
+
+	return time.Time{}, time.Time{}, "", false
 }
 
 // parseAnchor reads the moment to look around. Unlike the scheduler's parser it
