@@ -2,6 +2,7 @@ package agentd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -29,7 +30,15 @@ func (a *Agent) dispatch(text string) (string, error) {
 	case "errand", "errands":
 		return a.Errands.HandleCommand(text), nil
 	case "remind", "reminder", "reminders":
-		return a.Reminders.HandleCommand(a.ownerRequester(), text), nil
+		// The module answers in prose, for a person reading a chat, so a refusal
+		// comes back as ordinary text. On this socket the caller is a program (the
+		// CLI, the console, the MCP bridge) that has to be able to tell whether the
+		// command took effect, so a reply that says it did not is an error here.
+		reply := a.Reminders.HandleCommand(a.ownerRequester(), text)
+		if reminders.Failed(reply) {
+			return "", errors.New(reply)
+		}
+		return reply, nil
 	case "events", "agenda":
 		return a.eventsCmd(rest)
 	case "reschedule":

@@ -71,6 +71,27 @@ func IsCommand(text string) bool {
 // isSelf reports whether a <who> refers to the requester.
 func isSelf(who string) bool { return selfWords[norm(who)] }
 
+// failureMarks are how this module's replies say a command did not do anything:
+// a refusal, an id that matched nothing, or a line it could not parse.
+var failureMarks = []string{"⚠️", "No reminder #", "Usage:"}
+
+// Failed reports whether a reply from HandleCommand describes a command that did
+// not take effect.
+//
+// The replies are written for a person reading a chat, so a refusal comes back as
+// ordinary text and reads as success to anything that only checks for an error.
+// A caller that has to answer "did that work?" (the agent socket, and through it
+// the MCP tools) asks here rather than pattern-matching the prose itself.
+func Failed(reply string) bool {
+	r := strings.TrimSpace(reply)
+	for _, mark := range failureMarks {
+		if strings.Contains(r, mark) {
+			return true
+		}
+	}
+	return false
+}
+
 // thirdPartyRe matches a task that is itself a request to remind someone else:
 // "remind Raani to take the report", "please remind my wife about the class".
 // <who> is up to three words so "my wife" and "first wife" match, and the task
