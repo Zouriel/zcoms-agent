@@ -158,7 +158,14 @@ func (a *Agent) settingsCmd(args []string) (string, error) {
 		if len(args) < 3 {
 			return "", fmt.Errorf("usage: settings set <key> <value…>")
 		}
-		if err := a.Store.SetSetting(store.Owner, args[1], strings.Join(args[2:], " ")); err != nil {
+		value := strings.Join(args[2:], " ")
+		// The scheduler can only run on a schedule it recognises, and this is the
+		// path the console and the desktop app write through. Storing anything else
+		// leaves triage silently not running, with a setting that looks set.
+		if args[1] == "triage_schedule" && !runner.ValidTriageSchedule(value) {
+			return "", fmt.Errorf("triage_schedule must be one of: %s", strings.Join(runner.TriageSchedules, ", "))
+		}
+		if err := a.Store.SetSetting(store.Owner, args[1], value); err != nil {
 			return "", err
 		}
 		a.reloadSettings()

@@ -31,6 +31,35 @@ func TestTriageRejectsUnknownSubcommand(t *testing.T) {
 	}
 }
 
+// The console and the desktop app write the schedule through `settings set`, so
+// the same guard has to hold there: a value the scheduler cannot read leaves
+// triage not running while the setting looks set.
+func TestSettingsSetValidatesTriageSchedule(t *testing.T) {
+	a := testAgent(t)
+	if err := a.Store.SetSetting(store.Owner, "triage_schedule", "1h"); err != nil {
+		t.Fatalf("seed schedule: %v", err)
+	}
+
+	if _, err := a.settingsCmd([]string{"set", "triage_schedule", "08:00"}); err == nil {
+		t.Fatal("a clock time is not a schedule the scheduler reads; it should be refused")
+	}
+	if got, _ := a.Store.GetSetting("triage_schedule"); got != "1h" {
+		t.Fatalf("schedule was overwritten with %q", got)
+	}
+
+	if _, err := a.settingsCmd([]string{"set", "triage_schedule", "twice-daily"}); err != nil {
+		t.Fatalf("a valid schedule should set: %v", err)
+	}
+	if got, _ := a.Store.GetSetting("triage_schedule"); got != "twice-daily" {
+		t.Fatalf("schedule = %q, want twice-daily", got)
+	}
+
+	// Every other setting is still free text.
+	if _, err := a.settingsCmd([]string{"set", "auto_reply", "back", "shortly"}); err != nil {
+		t.Fatalf("unrelated setting should not be gated: %v", err)
+	}
+}
+
 // A real schedule still sets.
 func TestTriageAcceptsValidSchedule(t *testing.T) {
 	a := testAgent(t)
