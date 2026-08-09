@@ -53,6 +53,29 @@ func TestParseRangeWords(t *testing.T) {
 	}
 }
 
+// On the last day of the week, "this week" cannot mean that one day: the week
+// being asked about is the one starting tomorrow.
+func TestThisWeekOnSundayLooksAhead(t *testing.T) {
+	sunday := time.Date(2026, 8, 16, 10, 0, 0, 0, time.Local)
+	lo, hi, _, ok := parseRange("this week", sunday)
+	if !ok {
+		t.Fatal("this week should be a range")
+	}
+	if got := lo.Format("2006-01-02"); got != "2026-08-16" {
+		t.Fatalf("opens %s, want today", got)
+	}
+	if got := hi.Format("2006-01-02"); got != "2026-08-23" {
+		t.Fatalf("closes %s, want the end of the coming week", got)
+	}
+
+	// A Saturday still has a day left in its own week, so it is not rolled forward.
+	saturday := time.Date(2026, 8, 15, 10, 0, 0, 0, time.Local)
+	_, satHi, _, _ := parseRange("this week", saturday)
+	if got := satHi.Format("2006-01-02"); got != "2026-08-16" {
+		t.Fatalf("saturday closes %s, want 2026-08-16", got)
+	}
+}
+
 // Single days stay with parseAnchor, which knows how to render one day.
 func TestParseRangeLeavesSingleDays(t *testing.T) {
 	now := time.Date(2026, 8, 12, 14, 0, 0, 0, time.Local)

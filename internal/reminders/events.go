@@ -201,7 +201,14 @@ func parseRange(s string, now time.Time) (lo, hi time.Time, label string, ok boo
 
 	switch strings.ToLower(strings.Join(strings.Fields(s), " ")) {
 	case "this week", "the week", "week", "rest of the week", "rest of this week", "the rest of the week":
-		return named(today, endOf(weekStart.AddDate(0, 0, 6)), "this week")
+		// Asked on the last day of the week, "this week" would otherwise cover that
+		// one day. Nobody means that: on a Sunday the week being asked about is the
+		// one starting tomorrow, so run through the end of it.
+		last := weekStart.AddDate(0, 0, 6)
+		if intoWeek == 6 {
+			last = last.AddDate(0, 0, 7)
+		}
+		return named(today, endOf(last), "this week")
 	case "next week", "the coming week", "coming week":
 		start := weekStart.AddDate(0, 0, 7)
 		return named(start, endOf(start.AddDate(0, 0, 6)), "next week")
