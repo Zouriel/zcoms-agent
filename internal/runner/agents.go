@@ -20,16 +20,17 @@ type AgentConfig struct {
 
 const agentsFile = "agents.json"
 
-// AgentAvailable reports whether the backend's CLI is installed.
+// AgentAvailable reports whether the backend's CLI is installed. It resolves the
+// binary exactly as a run does (PATH, then ~/.local/bin), because a systemd user
+// service gets a minimal PATH without ~/.local/bin: a PATH-only probe reported
+// claude missing and silently rerouted every persona to codex.
 func AgentAvailable(b Backend) bool {
-	switch b.normalize() {
-	case BackendCodex:
-		_, err := exec.LookPath("codex")
-		return err == nil
-	default:
-		_, err := exec.LookPath("claude")
-		return err == nil
+	name := string(BackendClaude)
+	if b.normalize() == BackendCodex {
+		name = string(BackendCodex)
 	}
+	_, err := exec.LookPath(agentBin(name))
+	return err == nil
 }
 
 // AvailableAgents returns the installed backends, claude first.

@@ -84,6 +84,7 @@ func RunCodex(model, dir, prompt, resumeID string, role Role, stagingWritable bo
 
 	sessionID := resumeID
 	text := ""
+	failure := ""
 	for _, line := range strings.Split(stdout.String(), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -92,7 +93,11 @@ func RunCodex(model, dir, prompt, resumeID string, role Role, stagingWritable bo
 		var ev struct {
 			Type     string `json:"type"`
 			ThreadID string `json:"thread_id"`
-			Item     struct {
+			Message  string `json:"message"`
+			Error    struct {
+				Message string `json:"message"`
+			} `json:"error"`
+			Item struct {
 				Type string `json:"type"`
 				Text string `json:"text"`
 			} `json:"item"`
@@ -106,6 +111,13 @@ func RunCodex(model, dir, prompt, resumeID string, role Role, stagingWritable bo
 		if ev.Type == "item.completed" && ev.Item.Type == "agent_message" && ev.Item.Text != "" {
 			text = ev.Item.Text
 		}
+		// codex reports a failed turn (bad model, auth, quota) as JSON on stdout;
+		// its stderr only holds a "Reading additional input from stdin" banner.
+		if ev.Type == "turn.failed" && ev.Error.Message != "" {
+			failure = codexErrorMessage(ev.Error.Message)
+		} else if ev.Type == "error" && ev.Message != "" && failure == "" {
+			failure = codexErrorMessage(ev.Message)
+		}
 	}
 
 	if fileText, err := os.ReadFile(lastPath); err == nil {
@@ -115,6 +127,9 @@ func RunCodex(model, dir, prompt, resumeID string, role Role, stagingWritable bo
 	}
 
 	if text == "" {
+		if failure != "" {
+			return RunResult{SessionID: sessionID}, fmt.Errorf("codex failed: %s", failure)
+		}
 		if runErr != nil {
 			return RunResult{SessionID: sessionID}, fmt.Errorf("codex failed: %v: %s", runErr, strings.TrimSpace(stderr.String()))
 		}
@@ -122,4 +137,18 @@ func RunCodex(model, dir, prompt, resumeID string, role Role, stagingWritable bo
 	}
 
 	return RunResult{Text: text, SessionID: sessionID}, nil
+}
+
+// codexErrorMessage unwraps the API error codex nests as a JSON string inside
+// its event message, falling back to the raw message when it is not JSON.
+func codexErrorMessage(msg string) string {
+	var api struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal([]byte(msg), &api) == nil && api.Error.Message != "" {
+		return api.Error.Message
+	}
+	return msg
 }
