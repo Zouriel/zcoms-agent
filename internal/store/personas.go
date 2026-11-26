@@ -7,7 +7,7 @@ import (
 )
 
 // Persona is one agent identity (bridge/chat, triage, errand interviewer/
-// producer, standup interviewer): the single source for its static seed prompt +
+// producer, group answerer): the single source for its static seed prompt +
 // model + backend. The prompt-builder injects dynamic context at runtime; the
 // static scaffold lives here. Personas are crown jewels — owner-only writes.
 type Persona struct {
@@ -48,7 +48,7 @@ func (s *Store) ListPersonas() ([]Persona, error) {
 }
 
 // GetPersona returns one persona by key (the stable identifier other tiers
-// reference, e.g. "standup_interviewer").
+// reference, e.g. "errand_interviewer").
 func (s *Store) GetPersona(key string) (Persona, bool, error) {
 	rows, err := s.db.Query(`SELECT `+personaCols+` FROM agent_personas WHERE key=?`, key)
 	if err != nil {
@@ -139,4 +139,16 @@ func (s *Store) UpsertPersona(c Caller, p Persona) error {
 	}
 	_, err := s.CreatePersona(c, p)
 	return err
+}
+
+// DeletePersonaIfPresent removes a persona row by key when it exists, reporting
+// whether it did. It backs one-time migrations that retire a persona, so a
+// missing row is not an error. Only the agent's own start-up calls it.
+func (s *Store) DeletePersonaIfPresent(key string) (bool, error) {
+	res, err := s.db.Exec(`DELETE FROM agent_personas WHERE key=?`, key)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }

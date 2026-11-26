@@ -1,7 +1,7 @@
 // Package client is the published, module-facing API for the agent tier
-// (agent.sock). Modules (e.g. zcoms-team) import this to run errands, conduct a
-// standup interview by persona, manage scheduled jobs, and read the workspace /
-// session / persona registries — all through the one guarded seam, never by
+// (agent.sock). Modules (e.g. zcoms-console) import this to run errands, manage
+// scheduled jobs, and read the workspace / session / persona / group / project
+// registries — all through the one guarded seam, never by
 // opening agent.db.
 package client
 
@@ -15,28 +15,6 @@ import (
 
 	"github.com/Zouriel/zcoms/client"
 )
-
-// InterviewSpec mirrors the agent's standup interview request (JSON-compatible
-// with the agent's internal spec): conduct a brief async interview with a
-// contact, posting per-answer results back to the module's Callback socket. The
-// agent conducts it with its standup_interviewer persona.
-type InterviewSpec struct {
-	RunID     string              `json:"run_id"`
-	StaffID   string              `json:"staff_id"`
-	Target    string              `json:"target"` // @username / chat id of the team member
-	Greeting  string              `json:"greeting"`
-	Closing   string              `json:"closing"`
-	Callback  string              `json:"callback"` // module socket to post results to
-	Questions []InterviewQuestion `json:"questions"`
-}
-
-// InterviewQuestion is one thing the interview asks about.
-type InterviewQuestion struct {
-	TaskID       string `json:"task_id"`
-	GithubItemID string `json:"github_item_id"`
-	Title        string `json:"title"`
-	Prompt       string `json:"prompt"`
-}
 
 // Client talks to the agent process over agent.sock.
 type Client struct{ socket string }
@@ -61,9 +39,8 @@ func (c *Client) Available() bool {
 }
 
 type request struct {
-	Text      string         `json:"text,omitempty"`
-	Actor     string         `json:"actor,omitempty"`
-	Interview *InterviewSpec `json:"interview,omitempty"`
+	Text  string `json:"text,omitempty"`
+	Actor string `json:"actor,omitempty"`
 }
 
 type response struct {
@@ -114,13 +91,6 @@ func (c *Client) Errand(target, brief string, deliver, auto bool) (string, error
 	}
 	line += target + " | " + brief
 	return c.do(request{Text: line})
-}
-
-// Interview asks the agent to conduct a standup interview (by persona) and post
-// the result back to spec.ReplySocket. Returns once the interview is dispatched.
-func (c *Client) Interview(spec InterviewSpec) error {
-	_, err := c.do(request{Interview: &spec})
-	return err
 }
 
 // Workspaces returns the agent's workspace registry listing (human-readable).

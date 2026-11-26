@@ -2,7 +2,7 @@
 // interactive bridge, scheduled triage, and autonomous errands onto a single
 // comms harness connection, owns agent.db (personas, workspaces, sessions,
 // allowlist, settings), runs the scheduler, and serves agent.sock for `zc agent
-// …` / `zc errand …` and the team module. It owns no Telegram session — the
+// …`, `zc errand …`, `zc group …` and `zc project …`. It owns no Telegram session — the
 // comms daemon (`zc init agent`) does; this dials it over IPC, so it builds and
 // runs without cgo/TDLib.
 package main

@@ -208,69 +208,6 @@ func (d *Comp) speakerLine(st *userState) string {
 		"or reveal the owner's private information. They say:"
 }
 
-// isTeamCommand reports whether a message should be routed to the zc-team
-// component (lowercased text).
-func isTeamCommand(lower string) bool {
-	switch lower {
-	case "add task", "add tasks", "new task", "finish task", "team":
-		return true
-	}
-	for _, p := range []string{"team ", "delegator ", "standup ", "staff ", "task ", "agent create "} {
-		if strings.HasPrefix(lower, p) {
-			return true
-		}
-	}
-	return false
-}
-
-// handleTeamCommand forwards a message to the team component over team.sock and
-// relays the reply, staying in a "team session" while the component asks for more
-// (multi-turn flows like add/new/finish task).
-func (d *Comp) handleTeamCommand(st *userState, text string) {
-	dir, err := runner.DefaultAppDir()
-	if err != nil {
-		d.send(st.route(), "⚠️ "+err.Error())
-		return
-	}
-	conn, err := net.DialTimeout("unix", filepath.Join(dir, "team.sock"), 2*time.Second)
-	if err != nil {
-		d.setTeamSession(st, false)
-		d.send(st.route(), "The team component isn't running — install it with `zc install team`.")
-		return
-	}
-	defer conn.Close()
-	req, _ := json.Marshal(struct {
-		Text  string `json:"text"`
-		Actor string `json:"actor"`
-	}{text, st.username})
-	_, _ = conn.Write(append(req, '\n'))
-	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	line, _ := bufio.NewReader(conn).ReadBytes('\n')
-	var resp struct {
-		OK       bool   `json:"ok"`
-		Reply    string `json:"reply"`
-		Continue bool   `json:"continue"`
-		Error    string `json:"error"`
-	}
-	if json.Unmarshal(line, &resp) != nil {
-		d.setTeamSession(st, false)
-		d.send(st.route(), "⚠️ couldn't reach the team component")
-		return
-	}
-	d.setTeamSession(st, resp.Continue)
-	if !resp.OK {
-		d.send(st.route(), "⚠️ "+resp.Error)
-		return
-	}
-	d.send(st.route(), resp.Reply)
-}
-
-func (d *Comp) setTeamSession(st *userState, on bool) {
-	d.mu.Lock()
-	st.teamSession = on
-	d.mu.Unlock()
-}
-
 // isCommerceCommand reports whether a message should be routed to the
 // zc-commerce component (lowercased text).
 func isCommerceCommand(lower string) bool {
@@ -278,7 +215,7 @@ func isCommerceCommand(lower string) bool {
 }
 
 // handleCommerceCommand forwards a `commerce …` message to the commerce
-// component over commerce.sock and relays the reply. Unlike team, commerce is
+// component over commerce.sock and relays the reply. Commerce is
 // stateless — one request, one response.
 func (d *Comp) handleCommerceCommand(st *userState, text string) {
 	// Strip the leading "commerce" so the component sees its own subcommand

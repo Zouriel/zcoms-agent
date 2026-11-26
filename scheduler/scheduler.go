@@ -1,6 +1,6 @@
 // Package scheduler is a single-loop primitive that replaces the three
 // independent `for { sleep; check-due }` goroutines we used to run (triage
-// interval, errands one-shot, standups daily). Folding them into one ticking
+// interval, errands one-shot, project standups daily). Folding them into one ticking
 // loop means one place to reason about timing, one recover() boundary per job,
 // and a shared Store so the daily/once guards survive process restarts.
 package scheduler

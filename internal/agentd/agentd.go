@@ -385,7 +385,7 @@ func triageInterval(schedule string) time.Duration {
 }
 
 // subscribe streams inbound 1:1 messages from the comms daemon (all transports)
-// and routes each: a chat an active errand/interview owns goes to errands; an
+// and routes each: a chat an active errand owns goes to errands; an
 // allow-listed sender goes to the bridge, which replies on the same transport;
 // anything else is ignored (comms is a dumb pipe). Own/self messages are dropped
 // so the agent never auto-replies to the owner's own outbound.
@@ -468,12 +468,10 @@ func (a *Agent) subscribe(ctx context.Context) {
 
 // --- agent.sock command server ----------------------------------------------
 
-// sockRequest is one line on agent.sock: a text command (from `zc …`) or a
-// standup interview spec (from the team module).
+// sockRequest is one line on agent.sock: a text command (from `zc …`).
 type sockRequest struct {
-	Text      string                 `json:"text,omitempty"`
-	Actor     string                 `json:"actor,omitempty"`
-	Interview *errands.InterviewSpec `json:"interview,omitempty"`
+	Text  string `json:"text,omitempty"`
+	Actor string `json:"actor,omitempty"`
 }
 
 type sockResponse struct {
@@ -521,11 +519,6 @@ func (a *Agent) handleConn(conn net.Conn) {
 	var req sockRequest
 	if json.Unmarshal(line, &req) != nil {
 		writeSock(conn, sockResponse{Error: "bad request"})
-		return
-	}
-	if req.Interview != nil {
-		a.Errands.RunInterview(*req.Interview)
-		writeSock(conn, sockResponse{OK: true})
 		return
 	}
 	reply, err := a.dispatch(strings.TrimSpace(req.Text))

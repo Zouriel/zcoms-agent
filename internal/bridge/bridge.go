@@ -53,8 +53,6 @@ type userState struct {
 	triageRecipients []Recipient
 	triageSeed       string // system prompt prepended to the first turn, then cleared
 	triageSession    bool   // this session IS the persistent triage brain (interact triage)
-
-	teamSession bool // mid multi-turn zc-team conversation: route messages to team.sock
 }
 
 // route snapshots the session's reply destination (taken before any goroutine).
@@ -103,13 +101,6 @@ func (d *Comp) handle(st *userState, text string) {
 	if strings.HasPrefix(lower, "events ") || strings.HasPrefix(lower, "agenda ") ||
 		lower == "events" || lower == "agenda" {
 		d.handleEventsCommand(st, strings.TrimSpace(text))
-		return
-	}
-
-	// zc-team commands (and any ongoing multi-turn team conversation) are
-	// forwarded to the team component, which holds the conversation state.
-	if st.teamSession || isTeamCommand(lower) {
-		d.handleTeamCommand(st, strings.TrimSpace(text))
 		return
 	}
 

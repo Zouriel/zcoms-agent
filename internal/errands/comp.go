@@ -26,10 +26,9 @@ type Comp struct {
 	// the three errand agents has its own persona row, so they can differ.
 	agentBrain func(persona string) runner.Brain
 
-	mu         sync.Mutex
-	errands    map[string]*Errand
-	interviews map[int64]*interview        // standup interviews in flight, keyed by chat
-	scheduled  map[string]*ScheduledErrand // errands queued to fire at a future time, by id
+	mu        sync.Mutex
+	errands   map[string]*Errand
+	scheduled map[string]*ScheduledErrand // errands queued to fire at a future time, by id
 }
 
 // seed returns a persona's owner-editable seed prompt, or "" when unwired.
@@ -85,9 +84,6 @@ func (d *Comp) syncClaims() {
 		} else {
 			c.TG = append(c.TG, e.TGChat)
 		}
-	}
-	for cid := range d.interviews {
-		c.TG = append(c.TG, cid) // standup interviews claim the staff member's chat
 	}
 	d.mu.Unlock()
 	_ = runner.SaveClaims(c)

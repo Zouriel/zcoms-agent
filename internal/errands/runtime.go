@@ -25,7 +25,6 @@ func New(c *client.Client, waEnabled bool, agentBrain func(persona string) runne
 		personaSeed: personaSeed,
 		ownerChat:   ownerChat,
 		errands:     map[string]*Errand{},
-		interviews:  map[int64]*interview{},
 		scheduled:   map[string]*ScheduledErrand{},
 	}
 	// Resume persisted errands + their claims, and any scheduled errands.
@@ -53,16 +52,9 @@ func (d *Comp) OwnerChat() int64 { return d.ownerChat }
 // agent.sock entrypoint for `zc errand …`).
 func (d *Comp) HandleCommand(text string) string { return d.handleErrandCommand(text) }
 
-// RunInterview conducts a standup interview spec (from the team module) and posts
-// the result back. Runs in the background.
-func (d *Comp) RunInterview(spec InterviewSpec) { go d.runInterview(spec) }
-
 // FeedTelegram feeds an incoming Telegram reply (from the agent's event router)
-// into a matching interview or active errand. Returns true if it was consumed.
+// into a matching active errand. Returns true if it was consumed.
 func (d *Comp) FeedTelegram(chatID, messageID int64, text, file string) bool {
-	if d.feedInterview(chatID, text) {
-		return true
-	}
 	e := d.activeErrandForTG(chatID)
 	if e == nil {
 		return false
@@ -78,14 +70,11 @@ func (d *Comp) FeedTelegram(chatID, messageID int64, text, file string) bool {
 	return true
 }
 
-// Owns reports whether an active errand/interview claims a Telegram chat, so the
+// Owns reports whether an active errand claims a Telegram chat, so the
 // router knows to send the message here instead of to the bridge.
 func (d *Comp) Owns(chatID int64) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if _, ok := d.interviews[chatID]; ok {
-		return true
-	}
 	for _, e := range d.errands {
 		if e.Source != "wa" && e.TGChat == chatID && e.active() {
 			return true

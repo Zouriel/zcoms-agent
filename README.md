@@ -3,8 +3,8 @@
 `zcoms-agent` is the AI tier of the zcoms ecosystem. It folds the old
 `zcoms-bridge`, `zcoms-triage`, and `zcoms-errands` components into **one pure-Go
 binary** on a single comms-harness connection, owns **`agent.db`**, runs the
-scheduler, and serves **`agent.sock`** for `zc agent …` / `zc errand …` and the
-team module.
+scheduler, and serves **`agent.sock`** for `zc agent …` / `zc errand …`, `zc group …`
+and `zc project …`.
 
 `requires: [comms]` — it owns no Telegram session; it dials the comms daemon
 (`zc init agent`) over IPC, so it builds and runs without cgo/TDLib. Install with
@@ -13,7 +13,7 @@ team module.
 ## What it owns (`agent.db`, pure-Go `modernc.org/sqlite`)
 
 - **personas** — one row per agent identity (bridge/triage/errand interviewer &
-  producer/standup) holding its seed prompt + model + backend. The single source
+  producer/group/project standup) holding its seed prompt + model + backend. The single source
   for seed text; the prompt-builders inject dynamic context around it.
 - **workspaces** — discovered by scanning configured roots (never hand-authored);
   the row holds only augmentation (name, permission cap, pinned/ignored). Removal
@@ -34,6 +34,6 @@ the agent path go through it.
 
 ## Published contract
 
-Modules import `github.com/Zouriel/zcoms-agent/client` to run errands, conduct a
-standup interview, and read the registries — through the one guarded seam, never
+Modules import `github.com/Zouriel/zcoms-agent/client` to run errands and read
+the registries (workspaces, personas, groups, projects) — through the one guarded seam, never
 by opening `agent.db`.
