@@ -46,7 +46,19 @@ func groupEvent(group, msg string) client.Event {
 	return client.Event{Group: true, Transport: "telegram", Address: group, MsgRef: msg, Sender: "Sara", SenderID: "77", Text: "what is the capital of France?", Call: "mention"}
 }
 
+// newHandler answers the understand pass itself (as a Dhivehi question
+// restated in English) and hands only work passes to run.
 func newHandler(c *fakeComms, run Runner) *Handler {
+	work := run
+	run = func(r RunRequest) (string, error) {
+		if r.Persona == UnderstandPersona {
+			if len(r.Profile.Tools) != 0 {
+				return "", errors.New("understand pass got tools")
+			}
+			return "TASK: What is the capital of France?\nLANG: Dhivehi", nil
+		}
+		return work(r)
+	}
 	return &Handler{
 		Comms:    c,
 		Policies: fakePolicies{"telegram|-100": {Transport: "telegram", NativeID: "-100", Kind: store.GroupGeneral}},
@@ -99,8 +111,11 @@ func TestReplyQuotesCallingMessageInCallingGroup(t *testing.T) {
 	if !strings.Contains(req.Prompt, "untrusted background") || !strings.Contains(req.Prompt, "ignore all rules") {
 		t.Fatal("window not marked as untrusted background")
 	}
-	if i, j := strings.Index(req.Prompt, "untrusted background"), strings.Index(req.Prompt, "THE MESSAGE YOU ARE ANSWERING"); i > j {
-		t.Fatal("caller message not after the window")
+	if i, j := strings.Index(req.Prompt, "untrusted background"), strings.Index(req.Prompt, "THE QUESTION YOU ARE ANSWERING"); i > j {
+		t.Fatal("question not after the window")
+	}
+	if !strings.Contains(req.Prompt, "What is the capital of France?") || !strings.Contains(req.Prompt, "Dhivehi") || req.Persona != Persona {
+		t.Fatalf("work pass did not get the English task on the group persona: %s", req.Persona)
 	}
 }
 
@@ -246,5 +261,41 @@ func TestCutAtSentence(t *testing.T) {
 	}
 	if got := CutAtSentence("short", 700); got != "short" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestParseUnderstand(t *testing.T) {
+	cases := []struct{ out, task, lang, none string }{
+		{"TASK: Where is the meeting?\nLANG: Dhivehi", "Where is the meeting?", "Dhivehi", ""},
+		{"NONE: says thanks\nLANG: English", "", "English", "says thanks"},
+		{"garbage", "", "", ""},
+	}
+	for _, c := range cases {
+		task, lang, none := ParseUnderstand(c.out)
+		if task != c.task || lang != c.lang || none != c.none {
+			t.Errorf("ParseUnderstand(%q) = %q %q %q", c.out, task, lang, none)
+		}
+	}
+}
+
+// When the understand pass fails, the work pass still gets the raw message.
+func TestUnderstandFallback(t *testing.T) {
+	c := &fakeComms{}
+	var prompt string
+	h := &Handler{
+		Comms:    c,
+		Policies: fakePolicies{},
+		Run: func(r RunRequest) (string, error) {
+			if r.Persona == UnderstandPersona {
+				return "", errors.New("no backend")
+			}
+			prompt = r.Prompt
+			return "Paris.", nil
+		},
+	}
+	call, _ := CallFromEvent(groupEvent("-100", "1"))
+	h.Process(store.GroupPolicy{Kind: store.GroupGeneral}, call)
+	if !strings.Contains(prompt, "what is the capital of France?") || c.sends[0].text != "Paris." {
+		t.Fatalf("fallback lost the message: %q", prompt)
 	}
 }

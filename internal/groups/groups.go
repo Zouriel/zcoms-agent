@@ -35,8 +35,18 @@ const (
 	WindowCount   = 50  // messages before and after the call
 )
 
-// Persona is the persona key group answers run on.
-const Persona = "group"
+// Persona keys. Every call runs two passes: UnderstandPersona (the backend's
+// top model, no tools, tiny output) restates the call as a self-contained
+// English task; Persona (a lower model, with the group's tools) does the work
+// and writes the reply.
+const (
+	Persona           = "group"
+	UnderstandPersona = "group_understand"
+)
+
+// understandWindow is how many messages before the call the understand pass
+// sees; it only needs enough to resolve "it" and "that".
+const understandWindow = 10
 
 // FailReply is sent when a call cannot be answered.
 const FailReply = "Sorry, I could not answer that one right now."
@@ -288,7 +298,8 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call) (string, error) {
 	if cleanup != nil {
 		defer cleanup()
 	}
-	prompt := BuildPrompt(h.seed(), c, window, kind)
+	task, lang := h.understand(c, window)
+	prompt := BuildPrompt(h.seed(Persona), c, task, lang, window, kind)
 	out, err := h.Run(RunRequest{Persona: Persona, Dir: dir, Prompt: prompt, Profile: profile})
 	if err != nil {
 		return "", err
@@ -300,11 +311,11 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call) (string, error) {
 // fetch, in an empty scratch dir.
 var GeneralProfile = runner.ToolProfile{Tools: []string{"WebSearch", "WebFetch"}}
 
-func (h *Handler) seed() string {
+func (h *Handler) seed(key string) string {
 	if h.Seed == nil {
 		return ""
 	}
-	return h.Seed(Persona)
+	return h.Seed(key)
 }
 
 // capReply keeps a reply within MaxReply: one request to shorten, then a cut
@@ -349,4 +360,28 @@ func CutAtSentence(s string, max int) string {
 		return cut[:best+1]
 	}
 	return strings.TrimSpace(string(r[:max-1])) + "…"
+}
+
+// understand runs the tool-less first pass and returns the English task and
+// the asker's language. Without a model answer it falls back to the raw text.
+func (h *Handler) understand(c Call, window []client.GroupMessage) (task, lang string) {
+	task = strings.TrimSpace(c.Text)
+	dir, err := os.MkdirTemp(h.Scratch, "group-understand-*")
+	if err != nil {
+		return task, ""
+	}
+	defer os.RemoveAll(dir)
+	out, err := h.Run(RunRequest{Persona: UnderstandPersona, Dir: dir, Prompt: UnderstandPrompt(h.seed(UnderstandPersona), c, window)})
+	if err != nil {
+		h.logf("group %s/%s: understand pass: %v", c.Transport, c.GroupID, err)
+		return task, ""
+	}
+	t, l, none := ParseUnderstand(out)
+	switch {
+	case none != "":
+		return "The caller did not ask a question (" + none + "). Reply with one short, friendly line.", l
+	case t != "":
+		return t, l
+	}
+	return task, l
 }

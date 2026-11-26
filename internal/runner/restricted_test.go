@@ -26,6 +26,29 @@ func TestClaudeRestrictedArgsNeverGrantWrites(t *testing.T) {
 	}
 }
 
+// Every power tool the profile lacks is also denied by rule, sub-agent tools
+// included.
+func TestRestrictedDeniesUngrantedTools(t *testing.T) {
+	args := claudeRestrictedArgs("", "hi", ToolProfile{Tools: []string{"WebSearch", "WebFetch"}})
+	var tools, deny string
+	for i, a := range args {
+		switch a {
+		case "--tools":
+			tools = args[i+1]
+		case "--disallowedTools":
+			deny = args[i+1]
+		}
+	}
+	if tools != "WebSearch,WebFetch" {
+		t.Fatalf("tools = %q", tools)
+	}
+	for _, want := range []string{"Bash", "Read", "Grep", "Glob", "Write", "Edit", "Agent", "Task"} {
+		if !strings.Contains(","+deny+",", ","+want+",") {
+			t.Errorf("%s not denied: %s", want, deny)
+		}
+	}
+}
+
 func TestSupportsCodexOnlyWithShell(t *testing.T) {
 	cases := []struct {
 		p    ToolProfile

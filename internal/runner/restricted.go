@@ -19,7 +19,7 @@ const GroupCallEnv = "ZCOMS_GROUP_CALL"
 
 // restrictedRunTimeout bounds one group-call or standup turn. A group answer is
 // short; a run still going after this is stuck.
-const restrictedRunTimeout = 6 * time.Minute
+const restrictedRunTimeout = 10 * time.Minute
 
 // ToolProfile pins exactly which built-in tools a restricted run may use. It is
 // used for runs whose prompt carries third-party text (group calls, project
@@ -32,6 +32,11 @@ type ToolProfile struct {
 	// Deny are extra --disallowedTools patterns (e.g. "Read(**/.env*)").
 	Deny []string
 }
+
+// powerTools are the built-in tools denied by rule unless a profile grants
+// them, a second lock behind --tools (sub-agents included: there is no
+// sub-agent tool in a restricted run).
+var powerTools = []string{"Bash", "Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch", "Edit", "Write", "MultiEdit", "NotebookEdit", "Agent", "Task"}
 
 // HasShell reports whether the profile includes a shell tool.
 func (p ToolProfile) HasShell() bool {
@@ -77,7 +82,7 @@ var writeTools = []string{"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
 // claudeRestrictedArgs builds the claude flags for a restricted one-shot run.
 func claudeRestrictedArgs(model, prompt string, p ToolProfile) []string {
-	tools := make([]string, 0, len(p.Tools))
+	tools := make([]string, 0, len(p.Tools)+1)
 	for _, t := range p.Tools {
 		if !containsStr(writeTools, t) {
 			tools = append(tools, t)
@@ -96,7 +101,13 @@ func claudeRestrictedArgs(model, prompt string, p ToolProfile) []string {
 	if len(tools) > 0 {
 		args = append(args, "--allowedTools", strings.Join(tools, ","))
 	}
-	deny := append(append([]string{}, writeTools...), p.Deny...)
+	deny := append([]string{}, writeTools...)
+	for _, t := range powerTools {
+		if !containsStr(tools, t) && !containsStr(deny, t) {
+			deny = append(deny, t)
+		}
+	}
+	deny = append(deny, p.Deny...)
 	args = append(args, "--disallowedTools", strings.Join(deny, ","))
 	// "--" so a prompt starting with "-" is not parsed as an option.
 	return append(args, "--", prompt)
