@@ -78,8 +78,47 @@ func UnderstandPrompt(seed string, c Call, window []client.GroupMessage) string 
 	b.WriteString("Reply EXACTLY in these lines and nothing else:\n")
 	b.WriteString("TASK: <what they want, restated in English as one self-contained question or request>\n")
 	b.WriteString("LANG: <the language they wrote in>\n")
-	b.WriteString("If they are not asking for anything, write NONE: <a few words on what they said> instead of TASK.\n")
+	b.WriteString("WORK: quick or long (long when answering needs research, an investigation, reading code, running commands or making changes; quick when you could answer from what you already know)\n")
+	b.WriteString("ACK: <only when WORK is long: one short line to the asker, in the language they wrote in, saying you are on it and what you will do first; no promises about timing>\n")
+	b.WriteString("If they are not asking for anything, write NONE: <a few words on what they said> instead of TASK, WORK and ACK.\n")
 	return b.String()
+}
+
+// Understood is everything the understand pass decided.
+type Understood struct {
+	Task, Lang, None string
+	Long             bool   // the work pass will take a while (research, code, changes)
+	Ack              string // the line sent first when Long, in the asker's language
+}
+
+// maxAck caps the acknowledgement so a runaway answer cannot become the ack.
+const maxAck = 200
+
+// ParseUnderstood reads all the understand pass lines. Ack is kept only for
+// long work, on one line and capped.
+func ParseUnderstood(out string) Understood {
+	var u Understood
+	u.Task, u.Lang, u.None = ParseUnderstand(out)
+	for _, line := range strings.Split(out, "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		switch strings.ToUpper(strings.TrimSpace(k)) {
+		case "WORK":
+			u.Long = strings.EqualFold(strings.Trim(v, "<> ."), "long")
+		case "ACK":
+			u.Ack = v
+		}
+	}
+	if !u.Long || u.None != "" || u.Task == "" {
+		u.Ack = ""
+	}
+	if r := []rune(u.Ack); len(r) > maxAck {
+		u.Ack = strings.TrimSpace(string(r[:maxAck])) + "..."
+	}
+	return u
 }
 
 // ParseUnderstand reads the TASK:/LANG:/NONE: lines of the understand pass.

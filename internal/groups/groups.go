@@ -361,7 +361,11 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call) (string, error) {
 	if files := c.Attachments(); len(files) > 0 {
 		profile.Files = append(append([]string{}, profile.Files...), files...)
 	}
-	task, lang := h.understand(c, window)
+	task, lang, ack := h.understand(c, window)
+	if ack != "" {
+		// Long work: tell the asker it has started, so the wait is not silent.
+		h.reply(c, ack)
+	}
 	prompt := BuildPrompt(h.seed(Persona), c, task, lang, window, kind)
 	out, err := h.Run(RunRequest{Persona: Persona, Dir: dir, Prompt: prompt, Profile: profile})
 	if err != nil {
@@ -455,11 +459,11 @@ func CutAtSentence(s string, max int) string {
 
 // understand runs the tool-less first pass and returns the English task and
 // the asker's language. Without a model answer it falls back to the raw text.
-func (h *Handler) understand(c Call, window []client.GroupMessage) (task, lang string) {
+func (h *Handler) understand(c Call, window []client.GroupMessage) (task, lang, ack string) {
 	task = strings.TrimSpace(c.Text)
 	dir, err := os.MkdirTemp(h.Scratch, "group-understand-*")
 	if err != nil {
-		return task, ""
+		return task, "", ""
 	}
 	defer os.RemoveAll(dir)
 	// No tools, except reading exactly the caller's attached files.
@@ -467,14 +471,14 @@ func (h *Handler) understand(c Call, window []client.GroupMessage) (task, lang s
 		Profile: runner.ToolProfile{Files: c.Attachments()}})
 	if err != nil {
 		h.logf("group %s/%s: understand pass: %v", c.Transport, c.GroupID, err)
-		return task, ""
+		return task, "", ""
 	}
-	t, l, none := ParseUnderstand(out)
+	u := ParseUnderstood(out)
 	switch {
-	case none != "":
-		return "The caller did not ask a question (" + none + "). Reply with one short, friendly line.", l
-	case t != "":
-		return t, l
+	case u.None != "":
+		return "The caller did not ask a question (" + u.None + "). Reply with one short, friendly line.", u.Lang, ""
+	case u.Task != "":
+		return u.Task, u.Lang, u.Ack
 	}
-	return task, l
+	return task, u.Lang, ""
 }
