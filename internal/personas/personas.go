@@ -272,7 +272,33 @@ func BrainWith(s *store.Store, key string, override runner.Backend) runner.Brain
 	if got != want {
 		model = DefaultModel(got, key)
 	}
+	if !ModelFits(got, model) {
+		log.Printf("[personas] %q: model %q is not a %s model; using %q", key, model, got, DefaultModel(got, key))
+		model = DefaultModel(got, key)
+	}
 	return runner.Brain{Backend: got, Model: model}
+}
+
+// ModelFits reports whether a model name can belong to backend b. It only
+// rejects names that clearly belong to another CLI's family (a persona edited
+// to gemini-* while its backend stayed claude), so unknown names pass.
+func ModelFits(b runner.Backend, model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if m == "" {
+		return true
+	}
+	claude := strings.HasPrefix(m, "claude-") || m == "opus" || m == "sonnet" || m == "haiku" || m == "fable" || m == "opusplan"
+	gemini := strings.HasPrefix(m, "gemini-")
+	openai := strings.HasPrefix(m, "gpt-") || strings.HasPrefix(m, "o1") || strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4") || strings.HasPrefix(m, "codex")
+	switch b {
+	case runner.BackendClaude:
+		return !gemini && !openai
+	case runner.BackendCodex:
+		return !claude && !gemini
+	case runner.BackendAgy:
+		return !claude && !openai
+	}
+	return true
 }
 
 // SeedOr returns a persona's seed prompt from the store, falling back to the

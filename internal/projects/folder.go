@@ -65,13 +65,16 @@ func (s *Service) Dir(tp, group, path string, create bool) (string, error) {
 		}
 		ownID = p.ID
 	}
-	if err := s.checkDest(tp, g.NativeID, ownID, dest, create); err != nil {
+	// An unbound group may come back to a folder it left: unbinding keeps
+	// .zcoms and the history, so those are adopted instead of refused.
+	adopt := !bound && s.leftoversOf(tp, g, dest)
+	if err := s.checkDest(tp, g.NativeID, ownID, dest, create, adopt); err != nil {
 		return "", err
 	}
 	if bound {
 		return s.moveFolder(p, dest, create)
 	}
-	return s.addFolder(tp, g, dest, create)
+	return s.addFolder(tp, g, dest, create, adopt)
 }
 
 // cleanDest expands ~ and requires an absolute path.
@@ -129,7 +132,7 @@ func resolved(dest string) string {
 
 // checkDest validates a destination folder for a group. ownID is the group's
 // current project (0 when it has none), left out of the overlap checks.
-func (s *Service) checkDest(tp, nativeID string, ownID int64, dest string, create bool) error {
+func (s *Service) checkDest(tp, nativeID string, ownID int64, dest string, create, adopt bool) error {
 	destReal := resolved(dest)
 	for _, cfg := range configDirs() {
 		if within(dest, cfg) || within(destReal, cfg) {
@@ -178,12 +181,35 @@ func (s *Service) checkDest(tp, nativeID string, ownID int64, dest string, creat
 			return fmt.Errorf("%s is kept as another group's folder", dest)
 		}
 	}
+	if adopt {
+		return nil
+	}
 	for _, name := range []string{DotfileName, HistoryDir} {
 		if _, err := os.Lstat(filepath.Join(dest, name)); err == nil {
-			return fmt.Errorf("%s already has a %s; pick a folder without one", dest, name)
+			return fmt.Errorf("%s already has a %s from another group; pick a folder without one", dest, name)
 		}
 	}
 	return nil
+}
+
+// leftoversOf reports whether dest holds .zcoms or .zcoms.d left behind by
+// this same group: the folder is the one recorded for the group, or the
+// .zcoms names the group. Leftovers of any other group are never adopted.
+func (s *Service) leftoversOf(tp string, g *client.Group, dest string) bool {
+	has := false
+	for _, name := range []string{DotfileName, HistoryDir} {
+		if _, err := os.Lstat(filepath.Join(dest, name)); err == nil {
+			has = true
+		}
+	}
+	if !has {
+		return false
+	}
+	if folder, known, err := s.Store.GroupFolder(tp, g.NativeID); err == nil && known && filepath.Clean(folder) == dest {
+		return true
+	}
+	dot, ok, err := ReadDotfile(dest)
+	return err == nil && ok && dot.Group == g.Name
 }
 
 // step fails the named step when a test asks it to.
@@ -536,7 +562,7 @@ func (s *Service) moveFolder(p store.Project, dest string, create bool) (string,
 // does: .zcoms, .zcoms.d/history.db, .gitignore in every repo that could pick
 // it up, the managed block where instruction files exist, the workspace, and
 // listening on. Follow tasks stays off. Any failure puts everything back.
-func (s *Service) addFolder(tp string, g *client.Group, dest string, create bool) (string, error) {
+func (s *Service) addFolder(tp string, g *client.Group, dest string, create, adopt bool) (string, error) {
 	pol, has, err := s.Store.GetGroupPolicy(tp, g.NativeID)
 	if err != nil {
 		return "", err
@@ -566,13 +592,25 @@ func (s *Service) addFolder(tp string, g *client.Group, dest string, create bool
 		return fail(err)
 	}
 
-	undo.push(func() error { return os.RemoveAll(filepath.Join(dest, HistoryDir)) })
+	if !adopt {
+		undo.push(func() error { return os.RemoveAll(filepath.Join(dest, HistoryDir)) })
+	}
 	h, err := OpenHistory(dest)
 	if err != nil {
 		return fail(err)
 	}
 	var notes []string
 	dot := Dotfile{Group: g.Name}
+	var oldDot []byte
+	if adopt {
+		// Keep the members and aliases the owner already set up.
+		if prev, ok, err := ReadDotfile(dest); err == nil && ok {
+			dot = prev
+			dot.Group = g.Name
+		}
+		oldDot, _ = os.ReadFile(filepath.Join(dest, DotfileName))
+		notes = append(notes, "reused the .zcoms and history already in "+dest)
+	}
 	if members, err := s.Owner.GroupMembers(tp, g.NativeID); err != nil {
 		notes = append(notes, "warning: could not read the members yet ("+err.Error()+")")
 	} else {
@@ -589,6 +627,9 @@ func (s *Service) addFolder(tp string, g *client.Group, dest string, create bool
 	}
 	s.copyContactAliases(&dot)
 	undo.push(func() error {
+		if oldDot != nil {
+			return os.WriteFile(filepath.Join(dest, DotfileName), oldDot, 0o640)
+		}
 		if err := os.Remove(filepath.Join(dest, DotfileName)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}

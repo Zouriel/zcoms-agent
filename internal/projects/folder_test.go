@@ -341,3 +341,39 @@ func TestDirValidation(t *testing.T) {
 		t.Fatalf("path = %s", q.Path)
 	}
 }
+
+func TestDirReaddsFolderWithItsOwnLeftovers(t *testing.T) {
+	s, _, _, _ := trackService(t, acmeGroup, client.Group{Name: "Other", Transport: "telegram", NativeID: "-2002"})
+	dest := t.TempDir()
+	if _, err := s.Dir("telegram", "Acme", dest, false); err != nil {
+		t.Fatal(err)
+	}
+	p, _, _ := s.Store.ProjectForGroup("telegram", "-1001")
+	h, err := OpenHistory(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.AddTask("keep me", 0, "1"); err != nil {
+		t.Fatal(err)
+	}
+	h.Close()
+	// Unbind the way remove does: the binding goes, the files stay.
+	if err := s.Store.DeleteProject(store.Owner, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Dir("telegram", "Other", dest, false); err == nil {
+		t.Fatal("another group adopted Acme's leftovers")
+	}
+	if _, err := s.Dir("telegram", "Acme", dest, false); err != nil {
+		t.Fatalf("re-adding the same folder: %v", err)
+	}
+	h, err = OpenHistory(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	ts, err := h.OpenTasks()
+	if err != nil || len(ts) != 1 || ts[0].Title != "keep me" {
+		t.Fatalf("history not reused: %+v %v", ts, err)
+	}
+}
