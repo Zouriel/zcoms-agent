@@ -24,12 +24,15 @@ import (
 	"github.com/Zouriel/zcoms/client"
 )
 
-// Limits on group calls.
+// Limits on group calls. Every call gets its own independent run, so many
+// questions are answered at once; MaxConcurrent is a safety ceiling across all
+// groups, and a call that cannot get a slot within SlotWait gets FailReply.
 const (
-	MaxQueued   = 3   // calls waiting behind the one running, per group
-	MaxPerHour  = 20  // admitted calls per group per rolling hour
-	MaxReply    = 700 // characters in one group reply
-	WindowCount = 50  // messages before and after the call
+	MaxConcurrent = 8
+	SlotWait      = 5 * time.Minute
+	MaxPerHour    = 20  // admitted calls per group per rolling hour
+	MaxReply      = 700 // characters in one group reply
+	WindowCount   = 50  // messages before and after the call
 )
 
 // Persona is the persona key group answers run on.
@@ -103,13 +106,15 @@ type Handler struct {
 	Now      func() time.Time
 
 	mu     sync.Mutex
-	groups map[string]*groupState
+	stamps map[string][]time.Time // admitted calls per group, last hour
+
+	semOnce sync.Once
+	sem     chan struct{}
 }
 
-type groupState struct {
-	busy   bool
-	queue  []Call
-	stamps []time.Time
+func (h *Handler) slots() chan struct{} {
+	h.semOnce.Do(func() { h.sem = make(chan struct{}, MaxConcurrent) })
+	return h.sem
 }
 
 func (h *Handler) now() time.Time {
@@ -168,88 +173,56 @@ func (h *Handler) Handle(ev client.Event) {
 	if !ok {
 		return // off: no reply, no reads
 	}
-	start, admitted := h.admit(c)
-	if !admitted {
-		h.logf("group %s/%s: call %s dropped (queue full or hourly limit)", c.Transport, c.GroupID, c.MsgID)
+	if !h.admit(c) {
+		h.logf("group %s/%s: call %s dropped (hourly limit)", c.Transport, c.GroupID, c.MsgID)
 		return
 	}
-	if start {
-		go h.work(c)
-	}
+	go h.work(c)
 }
 
-// admit applies the per-group queue and hourly limit. start reports that no
-// worker is running for the group, so the caller must start one for c.
-func (h *Handler) admit(c Call) (start, admitted bool) {
+// admit applies the per-group hourly limit.
+func (h *Handler) admit(c Call) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.groups == nil {
-		h.groups = map[string]*groupState{}
+	if h.stamps == nil {
+		h.stamps = map[string][]time.Time{}
 	}
 	key := c.Transport + "|" + c.GroupID
-	g := h.groups[key]
-	if g == nil {
-		g = &groupState{}
-		h.groups[key] = g
-	}
 	now := h.now()
-	kept := g.stamps[:0]
-	for _, t := range g.stamps {
+	var kept []time.Time
+	for _, t := range h.stamps[key] {
 		if now.Sub(t) < time.Hour {
 			kept = append(kept, t)
 		}
 	}
-	g.stamps = kept
-	if len(g.stamps) >= MaxPerHour {
-		return false, false
+	if len(kept) >= MaxPerHour {
+		h.stamps[key] = kept
+		return false
 	}
-	if g.busy {
-		if len(g.queue) >= MaxQueued {
-			return false, false
-		}
-		g.queue = append(g.queue, c)
-		g.stamps = append(g.stamps, now)
-		return false, true
-	}
-	g.busy = true
-	g.stamps = append(g.stamps, now)
-	return true, true
+	h.stamps[key] = append(kept, now)
+	return true
 }
 
-// next pops the group's next queued call, or marks the group idle.
-func (h *Handler) next(c Call) (Call, bool) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	g := h.groups[c.Transport+"|"+c.GroupID]
-	if g == nil || len(g.queue) == 0 {
-		if g != nil {
-			g.busy = false
-		}
-		return Call{}, false
-	}
-	n := g.queue[0]
-	g.queue = g.queue[1:]
-	return n, true
-}
-
+// work runs one call on its own goroutine once a concurrency slot is free.
+// It exits when the call is answered, or after SlotWait with FailReply.
 func (h *Handler) work(c Call) {
-	for {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					h.logf("group call panic: %v", r)
-				}
-			}()
-			// Re-read the policy: the owner may have turned the group off
-			// while this call waited.
-			if p, ok, err := h.Policies.GetGroupPolicy(c.Transport, c.GroupID); err == nil && ok {
-				h.Process(p, c)
-			}
-		}()
-		var more bool
-		if c, more = h.next(c); !more {
-			return
+	select {
+	case h.slots() <- struct{}{}:
+	case <-time.After(SlotWait):
+		h.logf("group %s/%s: no free slot for call %s", c.Transport, c.GroupID, c.MsgID)
+		h.reply(c, FailReply)
+		return
+	}
+	defer func() { <-h.slots() }()
+	defer func() {
+		if r := recover(); r != nil {
+			h.logf("group call panic: %v", r)
 		}
+	}()
+	// Re-read the policy: the owner may have turned the group off while this
+	// call waited for a slot.
+	if p, ok, err := h.Policies.GetGroupPolicy(c.Transport, c.GroupID); err == nil && ok {
+		h.Process(p, c)
 	}
 }
 

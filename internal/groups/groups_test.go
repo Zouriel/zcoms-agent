@@ -2,6 +2,7 @@ package groups
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -149,47 +150,93 @@ func TestReplyCap(t *testing.T) {
 	}
 }
 
-func TestQueueAndHourlyLimit(t *testing.T) {
+func TestHourlyLimit(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	h := &Handler{Now: func() time.Time { return now }}
 	call := Call{Transport: "telegram", GroupID: "-1"}
-	start, ok := h.admit(call)
-	if !start || !ok {
-		t.Fatal("first call not started")
-	}
-	for i := 0; i < MaxQueued; i++ {
-		if start, ok := h.admit(call); start || !ok {
-			t.Fatalf("queued call %d: start=%v ok=%v", i, start, ok)
+	for i := 0; i < MaxPerHour; i++ {
+		if !h.admit(call) {
+			t.Fatalf("call %d refused under the limit", i)
 		}
 	}
-	if _, ok := h.admit(call); ok {
-		t.Fatal("call beyond the queue admitted")
-	}
-	// Drain: the worker finishes everything.
-	for {
-		if _, more := h.next(call); !more {
-			break
-		}
-	}
-	// 4 admitted so far; fill to the hourly limit.
-	admitted := 1 + MaxQueued
-	for admitted < MaxPerHour {
-		if _, ok := h.admit(call); !ok {
-			t.Fatalf("call %d refused under the limit", admitted)
-		}
-		h.next(call)
-		admitted++
-	}
-	if _, ok := h.admit(call); ok {
+	if h.admit(call) {
 		t.Fatal("call over the hourly limit admitted")
 	}
+	if !h.admit(Call{Transport: "telegram", GroupID: "-2"}) {
+		t.Fatal("other group blocked")
+	}
 	now = now.Add(61 * time.Minute)
-	if _, ok := h.admit(call); !ok {
+	if !h.admit(call) {
 		t.Fatal("limit did not reset after an hour")
 	}
-	// Another group is independent.
-	if start, ok := h.admit(Call{Transport: "telegram", GroupID: "-2"}); !start || !ok {
-		t.Fatal("other group blocked")
+}
+
+// Calls run concurrently, each with its own run and its own reply_to, up to
+// MaxConcurrent at once.
+func TestCallsRunConcurrently(t *testing.T) {
+	c := &fakeComms{}
+	var mu sync.Mutex
+	running, peak := 0, 0
+	release := make(chan struct{})
+	dirs := map[string]bool{}
+	h := newHandler(c, func(r RunRequest) (string, error) {
+		mu.Lock()
+		running++
+		if running > peak {
+			peak = running
+		}
+		dirs[r.Dir] = true
+		mu.Unlock()
+		<-release
+		mu.Lock()
+		running--
+		mu.Unlock()
+		return "ok.", nil
+	})
+	n := MaxConcurrent + 2
+	for i := 0; i < n; i++ {
+		h.Handle(groupEvent("-100", strconv.Itoa(100+i)))
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		p := peak
+		mu.Unlock()
+		if p >= MaxConcurrent || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+	mu.Lock()
+	if peak != MaxConcurrent {
+		t.Fatalf("peak concurrency %d, want %d", peak, MaxConcurrent)
+	}
+	mu.Unlock()
+	close(release)
+	for time.Now().Before(deadline.Add(2 * time.Second)) {
+		c.mu.Lock()
+		done := len(c.sends)
+		c.mu.Unlock()
+		if done == n {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.sends) != n {
+		t.Fatalf("sent %d replies, want %d (waiting calls must not be dropped)", len(c.sends), n)
+	}
+	seen := map[string]bool{}
+	for _, s := range c.sends {
+		if s.to != "-100" || seen[s.replyTo] {
+			t.Fatalf("bad or duplicate reply target %+v", s)
+		}
+		seen[s.replyTo] = true
+	}
+	if len(dirs) != n {
+		t.Fatalf("%d scratch dirs for %d calls, want one each", len(dirs), n)
 	}
 }
 
