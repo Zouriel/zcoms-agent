@@ -19,7 +19,7 @@ type userState struct {
 
 	// Reply routing (Phase D): a session is keyed and answered by transport +
 	// native address, so a message on any connected app is answered on that same
-	// app. transport is "telegram" | "whatsapp" | "instagram"; address is the
+	// app. transport is "telegram" | "whatsapp"; address is the
 	// transport-native reply id (Telegram chat id string / WhatsApp JID / IG
 	// thread id).
 	transport string
@@ -64,7 +64,7 @@ func (st *userState) route() route {
 
 // sessionKey is the byUser map key: one session per (transport, native id) so
 // the same person on different apps is tracked separately and never collides
-// across transports (Telegram user id vs WhatsApp number vs Instagram thread).
+// across transports (Telegram user id vs WhatsApp number).
 func sessionKey(transport, nativeID string) string {
 	if transport == "" {
 		transport = "telegram"

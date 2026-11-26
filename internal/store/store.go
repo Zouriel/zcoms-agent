@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS triage_groups (
 CREATE TABLE IF NOT EXISTS triage_group_sources (
   id INTEGER PRIMARY KEY,
   group_id INTEGER NOT NULL REFERENCES triage_groups(id) ON DELETE CASCADE,
-  transport TEXT NOT NULL,          -- 'telegram'|'whatsapp'|'instagram'
+  transport TEXT NOT NULL,          -- 'telegram'|'whatsapp'
   account TEXT,                     -- which connected account (if >1)
   chat_filter TEXT                  -- optional include/exclude
 );
@@ -213,4 +213,29 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// RetiredTransports are platforms the comms daemon no longer routes. Rows that
+// still name one are dead weight from before their removal.
+var RetiredTransports = []string{"instagram", "discord", "viber"}
+
+// PurgeRetiredTransports deletes allowlist and triage_group_sources rows whose
+// platform is a retired transport, returning how many rows it removed. It is a
+// one-time clean-up run on start and a no-op once the rows are gone.
+func (s *Store) PurgeRetiredTransports() (int64, error) {
+	var total int64
+	for _, q := range []string{
+		`DELETE FROM allowlist WHERE lower(platform) = ?`,
+		`DELETE FROM triage_group_sources WHERE lower(transport) = ?`,
+	} {
+		for _, t := range RetiredTransports {
+			res, err := s.db.Exec(q, t)
+			if err != nil {
+				return total, fmt.Errorf("purging %s rows: %w", t, err)
+			}
+			n, _ := res.RowsAffected()
+			total += n
+		}
+	}
+	return total, nil
 }

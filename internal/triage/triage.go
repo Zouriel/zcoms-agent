@@ -153,7 +153,7 @@ func allTransports(s runner.Settings) map[string]bool {
 // collectUnreadFiltered fetches unread across all transports from the daemon
 // (Telegram live from TDLib, WhatsApp from the in-process whatsmeow store) and
 // keeps only the requested transports. transports keys are "telegram" |
-// "whatsapp" | "instagram".
+// "whatsapp".
 func collectUnreadFiltered(c *client.Client, s runner.Settings, transports map[string]bool) ([]message, error) {
 	items, err := c.Unread()
 	if err != nil {

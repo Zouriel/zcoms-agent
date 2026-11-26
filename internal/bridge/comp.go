@@ -43,7 +43,7 @@ type Comp struct {
 // inbound that mutates the session's address. Every reply goes through the comms
 // daemon on the message's own transport.
 type route struct {
-	transport string // "telegram" | "whatsapp" | "instagram"
+	transport string // "telegram" | "whatsapp"
 	address   string // transport-native reply id (chat id string / JID / thread id)
 }
 

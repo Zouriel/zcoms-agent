@@ -257,9 +257,7 @@ func AllowKey(platform, handle string) string {
 		}
 		return "telegram|" + h
 	default:
-		// instagram / discord / viber and any future transport: a bare,
-		// lower-cased handle (leading @ stripped). Stored correctly now even
-		// though only telegram + whatsapp are routed yet.
+		// Any future transport: a bare, lower-cased handle (leading @ stripped).
 		h := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(handle), "@"))
 		return p + "|" + h
 	}
@@ -278,15 +276,14 @@ func NormalizeAllowHandle(platform, handle string) string {
 		}
 		return h
 	default:
-		// instagram / discord / viber: store the bare handle (no leading @).
+		// Any future transport: store the bare handle (no leading @).
 		return strings.TrimPrefix(strings.TrimSpace(handle), "@")
 	}
 }
 
-// AllowPlatforms is the set of platforms an allow-list entry may target. Only
-// telegram + whatsapp are routed today; the rest are stored for when their
-// transports come online (so adding a contact's every channel is lossless).
-var AllowPlatforms = []string{"telegram", "whatsapp", "instagram", "discord", "viber"}
+// AllowPlatforms is the set of platforms an allow-list entry may target: the
+// transports the comms daemon routes.
+var AllowPlatforms = []string{"telegram", "whatsapp"}
 
 // IsAllowPlatform reports whether s names a known allow-list platform.
 func IsAllowPlatform(s string) bool {

@@ -108,7 +108,7 @@ func (d *Comp) stateFor(ev client.Event) *userState {
 	case "whatsapp":
 		digits := WADigits(ev.Address)
 		matchHandle, nativeID, address = digits, digits, ev.Address
-	default: // telegram (Instagram joins here later)
+	default: // telegram
 		matchHandle = ev.Sender
 		nativeID = strconv.FormatInt(ev.UserID, 10)
 		address = ev.Address

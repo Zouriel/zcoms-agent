@@ -218,7 +218,7 @@ func (d *Comp) reachable(c client.Contact) (transport, addr string, err error) {
 // contactAllowListed reports whether any of a contact's channels is allow-listed.
 func (d *Comp) contactAllowListed(c client.Contact) bool {
 	set := d.allowSet()
-	for _, p := range []string{"telegram", "whatsapp", "instagram", "discord", "viber"} {
+	for _, p := range runner.AllowPlatforms {
 		if a := strings.TrimSpace(c.Address(p)); a != "" && set[runner.AllowKey(p, a)] {
 			return true
 		}

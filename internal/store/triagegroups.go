@@ -23,7 +23,7 @@ type TriageGroup struct {
 type TriageSource struct {
 	ID         int64  `json:"id,omitempty"`
 	GroupID    int64  `json:"group_id,omitempty"`
-	Transport  string `json:"transport"`             // "telegram"|"whatsapp"|"instagram"
+	Transport  string `json:"transport"`             // "telegram"|"whatsapp"
 	Account    string `json:"account,omitempty"`     // which connected account (if >1)
 	ChatFilter string `json:"chat_filter,omitempty"` // optional include/exclude
 }

@@ -18,7 +18,7 @@ func RunOnce(c *client.Client, s runner.Settings, allow runner.Allowlist, seed s
 // transports are read, the digest is labeled with the group name, and the
 // owner's own messages are dropped. allow is the current allowlist, used to send
 // the canned auto-reply only to important NON-allow-listed senders. transports
-// keys are "telegram" | "whatsapp" | "instagram".
+// keys are "telegram" | "whatsapp".
 func RunGroup(c *client.Client, s runner.Settings, allow runner.Allowlist, seed, label string, transports map[string]bool, brain runner.Brain) {
 	runGroup(c, s, allow, seed, label, transports, brain)
 }

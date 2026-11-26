@@ -68,6 +68,7 @@ func Run(ctx context.Context) error {
 	if err := bootstrap.Run(st); err != nil {
 		return fmt.Errorf("first-run setup: %w", err)
 	}
+	runMigrations(st, lg)
 
 	c, err := client.NewDefault()
 	if err != nil {
@@ -419,7 +420,7 @@ func (a *Agent) subscribe(ctx context.Context) {
 					return
 				}
 				a.Bridge.HandleEvent(ev)
-			default: // telegram (Instagram joins the bridge path later)
+			default: // telegram
 				if a.Errands.Owns(ev.ChatID) {
 					a.Errands.FeedTelegram(ev.ChatID, ev.MessageID, ev.Text, ev.File)
 					return
