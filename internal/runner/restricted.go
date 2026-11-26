@@ -201,10 +201,12 @@ func RunRestricted(brain Brain, dir, prompt string, p ToolProfile) (RunResult, e
 		if !p.onlyWeb() {
 			return RunResult{}, ErrProfileUnsupported
 		}
-		return runRestrictedCmd(agyBin, dir, agyWebOnlyArgs(brain.Model, prompt), func(out string) (RunResult, error) {
+		res, err := runRestrictedCmd(agyBin, dir, agyWebOnlyArgs(brain.Model, prompt), func(out string) (RunResult, error) {
+			noteAgyAuth(out)
 			res, err := parseAgyJSON(out, "")
 			return RunResult{Text: res.Text}, err
 		})
+		return res, agyErrNote(err)
 	}
 	args := claudeRestrictedArgs(brain.Model, prompt, p)
 	return runRestrictedCmd(claudeBin, dir, args, parseClaudeJSON)

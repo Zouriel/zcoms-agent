@@ -199,9 +199,39 @@ func RunAgy(model, dir, prompt, resumeID string, role Role, stagingWritable bool
 	if ctx.Err() == context.DeadlineExceeded {
 		return RunResult{}, fmt.Errorf("agy timed out after %s", claudeRunTimeout)
 	}
+	noteAgyAuth(stdout.String() + stderr.String())
 	res, err := parseAgyJSON(strings.TrimSpace(stdout.String()), resumeID)
 	if err != nil && runErr != nil && strings.TrimSpace(stdout.String()) == "" {
 		return res, fmt.Errorf("agy failed: %v: %s", runErr, strings.TrimSpace(stderr.String()))
 	}
 	return res, err
+}
+
+// AgySignedOut, when set, is called (from any goroutine) each time an agy run
+// shows that the CLI is signed out. The agent rate-limits the owner ping.
+var AgySignedOut func()
+
+// agySignedOutMarkers are the phrases agy prints when its sign-in is gone.
+var agySignedOutMarkers = []string{"not logged into antigravity", "authentication failed or timed out", "please sign in"}
+
+// noteAgyAuth fires AgySignedOut when agy output says it is signed out.
+func noteAgyAuth(out string) {
+	if AgySignedOut == nil {
+		return
+	}
+	lo := strings.ToLower(out)
+	for _, m := range agySignedOutMarkers {
+		if strings.Contains(lo, m) {
+			AgySignedOut()
+			return
+		}
+	}
+}
+
+// agyErrNote passes an agy error through noteAgyAuth and returns it.
+func agyErrNote(err error) error {
+	if err != nil {
+		noteAgyAuth(err.Error())
+	}
+	return err
 }

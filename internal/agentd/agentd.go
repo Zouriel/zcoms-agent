@@ -141,6 +141,15 @@ func (a *Agent) buildRuntimes() error {
 		}
 	}
 
+	if settings.MainUser != "" {
+		owner := settings.MainUser
+		ping := &agyPinger{now: time.Now, send: func(text string) error {
+			_, err := a.Client.Send(owner, text)
+			return err
+		}}
+		runner.AgySignedOut = ping.fire
+	}
+
 	// seedFn reads a persona's owner-editable seed prompt from agent.db live, so
 	// console edits take effect without a restart.
 	seedFn := func(key string) string { return personas.SeedOr(a.Store, key) }

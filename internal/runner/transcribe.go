@@ -121,10 +121,11 @@ func TranscribeAudio(model, seed, scratchParent, audio string) (string, error) {
 	}
 	args := agyTranscribeArgs(model, dir, TranscribePrompt(seed, name))
 	res, err := runCmdTimeout(agyBin, dir, args, TranscribeTimeout, func(out string) (RunResult, error) {
+		noteAgyAuth(out)
 		r, err := parseAgyJSON(out, "")
 		return RunResult{Text: r.Text}, err
 	})
-	if err != nil {
+	if err := agyErrNote(err); err != nil {
 		return "", err
 	}
 	text, ok := ParseTranscript(res.Text)

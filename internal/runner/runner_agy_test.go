@@ -169,3 +169,14 @@ func TestListAgySessions(t *testing.T) {
 		t.Errorf("missing index = %v, %v", none, err)
 	}
 }
+
+func TestNoteAgyAuth(t *testing.T) {
+	hits := 0
+	AgySignedOut = func() { hits++ }
+	defer func() { AgySignedOut = nil }()
+	noteAgyAuth("W1126 cache.go: error getting token source: You are not logged into Antigravity.")
+	noteAgyAuth("all good")
+	if hits != 1 {
+		t.Fatalf("hits = %d, want 1", hits)
+	}
+}
