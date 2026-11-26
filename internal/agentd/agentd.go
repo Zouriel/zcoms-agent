@@ -18,6 +18,7 @@ import (
 	"github.com/Zouriel/zcoms-agent/internal/bootstrap"
 	"github.com/Zouriel/zcoms-agent/internal/bridge"
 	"github.com/Zouriel/zcoms-agent/internal/errands"
+	"github.com/Zouriel/zcoms-agent/internal/groups"
 	"github.com/Zouriel/zcoms-agent/internal/lineup"
 	"github.com/Zouriel/zcoms-agent/internal/morning"
 	"github.com/Zouriel/zcoms-agent/internal/personas"
@@ -45,6 +46,12 @@ type Agent struct {
 	Morning    *morning.Comp
 	Reschedule *reschedule.Comp
 	Lineup     *lineup.Comp
+	Groups     *groups.Handler
+
+	// Owner is an owner-caller comms client. Only owner commands from
+	// agent.sock use it (group on/off, project init/remove/follow), because
+	// the daemon refuses group_set from the agent caller.
+	Owner *client.Client
 
 	settings runner.Settings
 	log      *log.Logger
@@ -84,6 +91,7 @@ func Run(ctx context.Context) error {
 		Sessions: sessions.New(st),
 		Sched:    scheduler.NewWithStore(store.SchedulerStore{S: st}),
 		Client:   c.AsCaller("agent"),
+		Owner:    c.AsCaller("owner"),
 		log:      lg,
 	}
 	if err := a.buildRuntimes(); err != nil {
@@ -191,6 +199,13 @@ func (a *Agent) buildRuntimes() error {
 	a.Errands = errands.New(a.Client, settings.WhatsApp.Enabled,
 		func(persona string) runner.Brain { return personas.Brain(a.Store, persona) },
 		mainChat, seedFn)
+
+	// Group calls: one fresh, tool-restricted turn per call on the group
+	// persona, replying only to the calling message in the calling group.
+	a.Groups = &groups.Handler{
+		Comms: a.Client, Policies: a.Store, Run: a.runRestricted,
+		Seed: seedFn, Scratch: groupScratch(), Log: a.log,
+	}
 
 	// Migrate the legacy single triage schedule into a "Default" group on first
 	// run (idempotent — only seeds when no groups exist yet).
@@ -525,6 +540,12 @@ func (a *Agent) handleConn(conn net.Conn) {
 	var req sockRequest
 	if json.Unmarshal(line, &req) != nil {
 		writeSock(conn, sockResponse{Error: "bad request"})
+		return
+	}
+	// A group call's shell must not drive the agent: no errands, reminders,
+	// project writes or group changes from inside a group run.
+	if peerInGroupCall(conn) {
+		writeSock(conn, sockResponse{Error: "agent commands are not available from a group call"})
 		return
 	}
 	reply, err := a.dispatch(strings.TrimSpace(req.Text))

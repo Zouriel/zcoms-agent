@@ -62,6 +62,8 @@ func (a *Agent) dispatch(text string) (string, error) {
 		return a.settingsCmd(rest)
 	case "json":
 		return a.jsonQuery(rest)
+	case "group", "groups":
+		return a.groupCmd(text)
 	default:
 		return "", fmt.Errorf("unknown command %q", verb)
 	}

@@ -163,6 +163,9 @@ CREATE TABLE IF NOT EXISTS reminder_events (
 );`); err != nil {
 		return err
 	}
+	if _, err := s.db.Exec(groupsSchema); err != nil {
+		return fmt.Errorf("creating group tables: %w", err)
+	}
 	// Columns added to the reminders table after its first cut, applied
 	// idempotently so existing databases pick them up on open:
 	//   - carry_over / runs: the agent-driven refactor (free-text note + run cap).
