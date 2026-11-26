@@ -4,7 +4,7 @@ go 1.25.11
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	github.com/Zouriel/zcoms v1.5.0
+	github.com/Zouriel/zcoms v1.6.0
 	modernc.org/sqlite v1.53.0
 )
 
@@ -20,5 +20,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/Zouriel/zcoms => ../zcoms
