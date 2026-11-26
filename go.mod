@@ -3,12 +3,12 @@ module github.com/Zouriel/zcoms-agent
 go 1.25.11
 
 require (
-	github.com/Zouriel/zcoms v1.3.0
+	github.com/BurntSushi/toml v1.6.0
+	github.com/Zouriel/zcoms v1.5.0
 	modernc.org/sqlite v1.53.0
 )
 
 require (
-	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -20,5 +20,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/Zouriel/zcoms => ../zcoms
