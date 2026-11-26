@@ -166,6 +166,12 @@ CREATE TABLE IF NOT EXISTS reminder_events (
 	if _, err := s.db.Exec(groupsSchema); err != nil {
 		return fmt.Errorf("creating group tables: %w", err)
 	}
+	for _, col := range projectColumns {
+		if _, err := s.db.Exec(`ALTER TABLE projects ADD COLUMN ` + col); err != nil &&
+			!strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			return err
+		}
+	}
 	// Columns added to the reminders table after its first cut, applied
 	// idempotently so existing databases pick them up on open:
 	//   - carry_over / runs: the agent-driven refactor (free-text note + run cap).

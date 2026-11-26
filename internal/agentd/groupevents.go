@@ -63,13 +63,13 @@ func (a *Agent) groupCmd(text string) (string, error) {
 		return "", err
 	}
 	words = words[1:]
-	usage := errors.New("usage: group on|off <telegram|whatsapp> <group> | group list")
+	usage := errors.New("usage: group on|off <telegram|whatsapp> <group> | group track on|off <telegram|whatsapp> <group> [--purge] | group list")
 	if len(words) == 0 {
 		return "", usage
 	}
 	switch words[0] {
 	case "list", "ls":
-		ps, err := a.Store.ListGroupPolicies()
+		ps, err := a.groupPolicyViews()
 		if err != nil {
 			return "", err
 		}
@@ -78,9 +78,15 @@ func (a *Agent) groupCmd(text string) (string, error) {
 		}
 		var b strings.Builder
 		for _, p := range ps {
-			fmt.Fprintf(&b, "%s  %s  %s\n", p.Kind, p.Transport, p.Name)
+			fmt.Fprintf(&b, "%s  %s  %s", p.Kind, p.Transport, p.Name)
+			if p.Folder != "" {
+				fmt.Fprintf(&b, "  %s", p.Folder)
+			}
+			b.WriteString("\n")
 		}
 		return strings.TrimRight(b.String(), "\n"), nil
+	case "track":
+		return a.trackCmd(words[1:])
 	case "on", "off":
 	default:
 		return "", usage
@@ -105,6 +111,9 @@ func (a *Agent) groupCmd(text string) (string, error) {
 		return "", err
 	}
 	if has && pol.Kind == store.GroupProject {
+		if p, ok, _ := a.Store.ProjectForGroup(tp, g.NativeID); ok && p.Tracked {
+			return "", fmt.Errorf("%s has task tracking on; turn tracking off first (group track off)", g.Name)
+		}
 		return "", fmt.Errorf("%s is a project group; use zc project remove inside the project folder", g.Name)
 	}
 	on := words[0] == "on"
@@ -123,6 +132,100 @@ func (a *Agent) groupCmd(text string) (string, error) {
 		return fmt.Sprintf("On: I will answer when someone in %s mentions me or replies to me.", g.Name), nil
 	}
 	return fmt.Sprintf("Off: I will ignore %s.", g.Name), nil
+}
+
+// trackCmd handles `group track on|off <transport> <group> [--purge]`. Owner
+// only, like every agent.sock line; the console is the one place that sends it.
+func (a *Agent) trackCmd(words []string) (string, error) {
+	usage := errors.New("usage: group track on|off <telegram|whatsapp> <group> [--purge]")
+	args, err := cmdline.Parse(words, "purge")
+	if err != nil {
+		return "", err
+	}
+	pos := args.Pos
+	if len(pos) < 3 || (pos[0] != "on" && pos[0] != "off") {
+		return "", usage
+	}
+	tp := strings.ToLower(pos[1])
+	if !runner.IsAllowPlatform(tp) {
+		return "", fmt.Errorf("unknown transport %q (want telegram or whatsapp)", pos[1])
+	}
+	on := pos[0] == "on"
+	if on && args.Has("purge") {
+		return "", errors.New("--purge only goes with track off")
+	}
+	return a.Projects.Track(tp, strings.Join(pos[2:], " "), on, args.Has("purge"))
+}
+
+// groupPolicyView is a group policy as the console and `group list` show it:
+// kind is general, tasks (a tracked folder with no repo) or project, and
+// Folder is the bound folder of a tasks or project group.
+type groupPolicyView struct {
+	store.GroupPolicy
+	Folder  string `json:"folder,omitempty"`
+	Tracked bool   `json:"tracked,omitempty"`
+}
+
+func (a *Agent) groupPolicyViews() ([]groupPolicyView, error) {
+	ps, err := a.Store.ListGroupPolicies()
+	if err != nil {
+		return nil, err
+	}
+	projs, err := a.Store.ListProjects()
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]store.Project, len(projs))
+	for _, p := range projs {
+		byID[p.ID] = p
+	}
+	out := make([]groupPolicyView, 0, len(ps))
+	for _, pol := range ps {
+		v := groupPolicyView{GroupPolicy: pol}
+		if pol.Kind == store.GroupProject {
+			if p, ok := byID[pol.ProjectID]; ok {
+				v.Folder, v.Tracked = p.Path, p.Tracked
+				v.Kind = projects.KindOf(p)
+			}
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// handleGroupJoined turns on, as a general group, a group the account was
+// just added to, joined or created (owner standing instruction: every group
+// the account is in answers calls with web-only reach). A group that already
+// has a policy keeps it. Nothing in the event can choose the kind.
+func (a *Agent) handleGroupJoined(ev client.Event) {
+	tp := ev.Transport
+	if tp == "" {
+		tp = "telegram"
+	}
+	if !runner.IsAllowPlatform(tp) || ev.Address == "" {
+		return
+	}
+	if _, has, err := a.Store.GetGroupPolicy(tp, ev.Address); err != nil {
+		a.log.Printf("group joined %s/%s: %v", tp, ev.Address, err)
+		return
+	} else if has {
+		a.log.Printf("group joined %s %q: already has a policy, left as is", tp, ev.GroupName)
+		return
+	}
+	if err := a.Store.SetGroupPolicy(store.Owner, store.GroupPolicy{
+		Transport: tp, NativeID: ev.Address, Name: ev.GroupName, Kind: store.GroupGeneral,
+	}); err != nil {
+		a.log.Printf("group joined %s/%s: %v", tp, ev.Address, err)
+		return
+	}
+	listen := true
+	if a.Owner != nil {
+		if _, err := a.Owner.GroupSet(tp, ev.Address, &listen, nil); err != nil {
+			a.log.Printf("group joined %s %q: policy saved but comms listen failed: %v", tp, ev.GroupName, err)
+			return
+		}
+	}
+	a.log.Printf("group joined: %s %q (%s) is now a general group", tp, ev.GroupName, ev.Address)
 }
 
 // projectCmd runs a `project …` line from the CLI.

@@ -437,6 +437,10 @@ func (a *Agent) subscribe(ctx context.Context) {
 			if ev.FromSelf {
 				return
 			}
+			if ev.Event == client.EventGroupJoined {
+				a.handleGroupJoined(ev)
+				return
+			}
 			// Group calls never reach the 1:1 paths (bridge, errands,
 			// reminders, morning, lineup, reschedule).
 			if ev.Group {

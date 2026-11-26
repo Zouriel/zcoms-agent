@@ -2,9 +2,11 @@ package client
 
 import "strconv"
 
-// GroupPolicy is one group the agent answers in. Kind is "general" or
-// "project"; ProjectPath is set for a project group. LastCall is the unix time
-// of the last call (0 when never).
+// GroupPolicy is one group the agent answers in. Kind is "general", "tasks"
+// (task tracking on, its folder holds no repo yet) or "project"; Folder and
+// ProjectPath are set for tasks and project groups. Tracked is true when the
+// folder came from task tracking (console toggle) rather than project init.
+// LastCall is the unix time of the last call (0 when never).
 type GroupPolicy struct {
 	Transport   string `json:"transport"`
 	NativeID    string `json:"native_id"`
@@ -12,6 +14,8 @@ type GroupPolicy struct {
 	Kind        string `json:"kind"`
 	ProjectID   int64  `json:"project_id,omitempty"`
 	ProjectPath string `json:"project_path,omitempty"`
+	Folder      string `json:"folder,omitempty"`
+	Tracked     bool   `json:"tracked,omitempty"`
 	LastCall    int64  `json:"last_call,omitempty"`
 }
 
@@ -23,6 +27,7 @@ type ProjectInfo struct {
 	NativeID    string `json:"native_id"`
 	GroupName   string `json:"group_name"`
 	FollowTasks bool   `json:"follow_tasks"`
+	Tracked     bool   `json:"tracked,omitempty"`
 }
 
 // ProjectMember is a project group member with the nicknames .zcoms gives

@@ -112,6 +112,9 @@ func (s *Service) Command(words []string) (string, error) {
 	}
 	switch sub {
 	case "remove":
+		if p.Tracked {
+			return s.untrack(p, a.Has("purge"))
+		}
 		return s.remove(p, a.Has("purge"))
 	case "members":
 		return s.members(p)

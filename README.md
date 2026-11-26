@@ -43,7 +43,9 @@ by opening `agent.db`.
 The agent stays silent in group chats until someone calls it: an @mention of
 its account, or a reply to one of its messages. It answers that one message as
 a reply in the same group, in two to four sentences (700 characters at most).
-A group is ignored until the owner turns it on, in one of two ways:
+A group is ignored until it is turned on. A group the agent's own account is
+added to, joins or creates is turned on as a general group automatically (the
+comms daemon announces it with a `group_joined` event). Otherwise:
 
 - **General group**: `zc group on <group> [--wa]` (`zc group off` to stop).
   Calls can use web search and fetch only, in an empty scratch folder. No
@@ -56,6 +58,15 @@ A group is ignored until the owner turns it on, in one of two ways:
   AGENTS.md/AGENT.md/CLAUDE.md telling coding agents to send requested updates
   with `zc project say "<text>"`. Calls run in the repo with read, search and
   shell (shell withheld when the workspace `max_role` is `read`), never edit.
+- **Tasks group**: the console's "Track tasks" toggle (agent line
+  `group track on|off <transport> <group> [--purge]`). Creates a folder under
+  the `groups_dir` setting (default `~/zcoms-groups`, named from the group),
+  with `.zcoms` and `.zcoms.d/history.db` like a project, follow tasks on and
+  the daily standup. Calls keep general reach (web only) but see the open
+  tasks and summaries. Once the folder holds a git repo, calls become project
+  calls rooted at the folder (the tightest `max_role` of the folder and its
+  repos applies). Turning it off keeps the folder and history unless
+  `--purge`, and puts the group back to general if it was general before.
 
 Every call runs two passes: `group_understand` (top model, no tools) restates
 the message in English, in any language including Dhivehi; `group` (lower

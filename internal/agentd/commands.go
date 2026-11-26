@@ -121,7 +121,7 @@ func (a *Agent) jsonQuery(args []string) (string, error) {
 		// from the CLIs themselves so the console offers real choices.
 		v = brains.List()
 	case "group-policies":
-		v, err = a.Store.ListGroupPolicies()
+		v, err = a.groupPolicyViews()
 	case "projects":
 		v, err = a.Store.ListProjects()
 	case "project":

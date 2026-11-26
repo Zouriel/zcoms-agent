@@ -121,6 +121,10 @@ type ProjectContext struct {
 	Dir     string             // the bound folder
 	Profile runner.ToolProfile // read, search, maybe shell; never edit
 	Notes   string             // recent summaries, open tasks, history db path
+	MaxRole string             // the workspace ceiling the profile was built under
+	// General is set for a tracked group whose folder holds no repo: the call
+	// runs like a general group (web only, empty scratch dir) with Notes added.
+	General bool
 }
 
 // Projects is the project side of group calls.
@@ -314,6 +318,16 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call) (string, error) {
 		pc, err := h.Projects.CallContext(pol.ProjectID)
 		if err != nil {
 			return "", err
+		}
+		if pc.General {
+			d, err := os.MkdirTemp(h.Scratch, "group-call-*")
+			if err != nil {
+				return "", err
+			}
+			dir, cleanup = d, func() { _ = os.RemoveAll(d) }
+			profile = GeneralProfile
+			kind = tasksKind(pc)
+			break
 		}
 		dir, profile = pc.Dir, pc.Profile
 		kind = projectKind(pc)

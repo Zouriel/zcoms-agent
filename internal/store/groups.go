@@ -37,6 +37,12 @@ type Project struct {
 	NativeID    string `json:"native_id"`
 	GroupName   string `json:"group_name"`
 	FollowTasks bool   `json:"follow_tasks"`
+	// Tracked marks a project made by `group track on` for a chat that is not
+	// a repo: its folder lives under groups_dir. RestoreGeneral says the group
+	// was an ordinary general group before tracking, so turning tracking off
+	// puts that back instead of turning the group off.
+	Tracked        bool `json:"tracked,omitempty"`
+	RestoreGeneral bool `json:"restore_general,omitempty"`
 }
 
 const groupsSchema = `
@@ -59,7 +65,28 @@ CREATE TABLE IF NOT EXISTS projects (
   group_name TEXT,
   follow_tasks INTEGER NOT NULL DEFAULT 0,
   created_at TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS group_folders (
+  transport TEXT NOT NULL,
+  native_id TEXT NOT NULL,
+  path TEXT NOT NULL UNIQUE,
+  created_at TEXT,
+  PRIMARY KEY(transport, native_id)
+);
+CREATE TABLE IF NOT EXISTS group_roles (
+  transport TEXT NOT NULL,
+  native_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  updated_at TEXT,
+  PRIMARY KEY(transport, native_id, member_id)
 );`
+
+// projectColumns are columns added to projects after its first cut.
+var projectColumns = []string{
+	"tracked INTEGER NOT NULL DEFAULT 0",
+	"restore_general INTEGER NOT NULL DEFAULT 0",
+}
 
 func validKind(k string) bool { return k == GroupGeneral || k == GroupProject }
 
@@ -146,14 +173,15 @@ func (s *Store) TouchGroupCall(transport, nativeID string, at time.Time) error {
 	return err
 }
 
-const projectCols = `p.id, p.workspace_id, w.path, w.max_role, p.transport, p.native_id, p.group_name, p.follow_tasks`
+const projectCols = `p.id, p.workspace_id, w.path, w.max_role, p.transport, p.native_id, p.group_name, p.follow_tasks, p.tracked, p.restore_general`
 
 func scanProject(sc interface{ Scan(...any) error }) (Project, error) {
 	var p Project
 	var role, name sql.NullString
-	var follow int
-	err := sc.Scan(&p.ID, &p.WorkspaceID, &p.Path, &role, &p.Transport, &p.NativeID, &name, &follow)
+	var follow, tracked, restore int
+	err := sc.Scan(&p.ID, &p.WorkspaceID, &p.Path, &role, &p.Transport, &p.NativeID, &name, &follow, &tracked, &restore)
 	p.MaxRole, p.GroupName, p.FollowTasks = role.String, name.String, follow == 1
+	p.Tracked, p.RestoreGeneral = tracked == 1, restore == 1
 	return p, err
 }
 
@@ -217,8 +245,9 @@ func (s *Store) CreateProject(c Caller, p Project) (Project, error) {
 		return Project{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	res, err := tx.Exec(`INSERT INTO projects(workspace_id, transport, native_id, group_name, follow_tasks, created_at, updated_at)
-		VALUES(?,?,?,?,?,?,?)`, p.WorkspaceID, p.Transport, p.NativeID, p.GroupName, boolToInt(p.FollowTasks), now(), now())
+	res, err := tx.Exec(`INSERT INTO projects(workspace_id, transport, native_id, group_name, follow_tasks, tracked, restore_general, created_at, updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?)`, p.WorkspaceID, p.Transport, p.NativeID, p.GroupName, boolToInt(p.FollowTasks),
+		boolToInt(p.Tracked), boolToInt(p.RestoreGeneral), now(), now())
 	if err != nil {
 		return Project{}, fmt.Errorf("binding project: %w", err)
 	}
@@ -258,5 +287,52 @@ func (s *Store) SetProjectFollow(c Caller, id int64, on bool) error {
 		return err
 	}
 	_, err := s.db.Exec(`UPDATE projects SET follow_tasks=?, updated_at=? WHERE id=?`, boolToInt(on), now(), id)
+	return err
+}
+
+// ProjectForGroup returns the project bound to a group, if any.
+func (s *Store) ProjectForGroup(transport, nativeID string) (Project, bool, error) {
+	p, err := scanProject(s.db.QueryRow(`SELECT `+projectCols+` FROM projects p JOIN workspaces w ON w.id=p.workspace_id
+		WHERE p.transport=? AND p.native_id=?`, transport, nativeID))
+	if err == sql.ErrNoRows {
+		return Project{}, false, nil
+	}
+	return p, err == nil, err
+}
+
+// GroupFolder returns the folder a tracked group was given, kept after
+// tracking is turned off so turning it on again reuses the same folder.
+func (s *Store) GroupFolder(transport, nativeID string) (string, bool, error) {
+	var path string
+	err := s.db.QueryRow(`SELECT path FROM group_folders WHERE transport=? AND native_id=?`, transport, nativeID).Scan(&path)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	return path, err == nil, err
+}
+
+// GroupFolderTaken reports whether path is some group's folder already.
+func (s *Store) GroupFolderTaken(path string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM group_folders WHERE path=?`, path).Scan(&n)
+	return n > 0, err
+}
+
+// SetGroupFolder records a group's folder. Owner-only.
+func (s *Store) SetGroupFolder(c Caller, transport, nativeID, path string) error {
+	if err := requireOwner(c, "group_folders"); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`INSERT INTO group_folders(transport, native_id, path, created_at) VALUES(?,?,?,?)
+		ON CONFLICT(transport, native_id) DO UPDATE SET path=excluded.path`, transport, nativeID, path, now())
+	return err
+}
+
+// DeleteGroupFolder forgets a group's folder (after a purge). Owner-only.
+func (s *Store) DeleteGroupFolder(c Caller, transport, nativeID string) error {
+	if err := requireOwner(c, "group_folders"); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM group_folders WHERE transport=? AND native_id=?`, transport, nativeID)
 	return err
 }
