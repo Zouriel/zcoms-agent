@@ -255,6 +255,23 @@ func (h *History) queryTasks(where string, args ...any) ([]Task, error) {
 // OpenTasks returns every open task.
 func (h *History) OpenTasks() ([]Task, error) { return h.queryTasks(`t.status=?`, TaskOpen) }
 
+// ClosedTasks returns up to limit done or dropped tasks, most recently closed
+// first.
+func (h *History) ClosedTasks(limit int) ([]Task, error) {
+	ts, err := h.queryTasks(`t.status<>?`, TaskOpen)
+	if err != nil {
+		return nil, err
+	}
+	// queryTasks orders by id; reverse so the newest come first.
+	for i, j := 0, len(ts)-1; i < j; i, j = i+1, j-1 {
+		ts[i], ts[j] = ts[j], ts[i]
+	}
+	if len(ts) > limit {
+		ts = ts[:limit]
+	}
+	return ts, nil
+}
+
 // Task returns one task by id.
 func (h *History) Task(id int64) (Task, bool, error) {
 	ts, err := h.queryTasks(`t.id=?`, id)

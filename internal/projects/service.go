@@ -601,6 +601,7 @@ type Detail struct {
 	Project   store.Project  `json:"project"`
 	Members   []DetailMember `json:"members"`
 	OpenTasks []Task         `json:"open_tasks"`
+	Closed    []Task         `json:"closed_tasks"` // done and dropped, newest 200
 	Summaries []Summary      `json:"summaries"`
 }
 
@@ -633,6 +634,9 @@ func (s *Service) Detail(id int64) (Detail, error) {
 		d.Members = append(d.Members, dm)
 	}
 	if d.OpenTasks, err = h.OpenTasks(); err != nil {
+		return d, err
+	}
+	if d.Closed, err = h.ClosedTasks(200); err != nil {
 		return d, err
 	}
 	d.Summaries, err = h.Summaries(30)

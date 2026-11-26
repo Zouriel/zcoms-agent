@@ -59,6 +59,7 @@ type ProjectDetail struct {
 	Project   ProjectInfo      `json:"project"`
 	Members   []ProjectMember  `json:"members"`
 	OpenTasks []ProjectTask    `json:"open_tasks"`
+	Closed    []ProjectTask    `json:"closed_tasks"` // done and dropped, newest first
 	Summaries []ProjectSummary `json:"summaries"`
 }
 
