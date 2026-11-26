@@ -203,12 +203,26 @@ func (s *Service) Track(tp, group string, on, purge bool) (string, error) {
 	if g == nil {
 		return "", fmt.Errorf("no %s group called %q", tp, group)
 	}
-	if on {
-		return s.trackOn(tp, g.NativeID, g.Name)
-	}
 	p, ok, err := s.Store.ProjectForGroup(tp, g.NativeID)
 	if err != nil {
 		return "", err
+	}
+	// A bound folder that holds a repo stays a project group either way:
+	// tracking only switches the standup and task following.
+	if ok && HasRepo(p.Path) {
+		if purge {
+			return "", fmt.Errorf("%s holds a repo, so the group stays a project; --purge only applies to a folder without one (zc project remove --purge unbinds it)", p.Path)
+		}
+		if _, err := s.follow(p, []string{onOffWord(on)}); err != nil {
+			return "", err
+		}
+		if on {
+			return fmt.Sprintf("Task tracking on for %s (project %s).", g.Name, p.Path), nil
+		}
+		return fmt.Sprintf("Task tracking off for %s. It stays a project group for %s; only the standup and task following stopped.", g.Name, p.Path), nil
+	}
+	if on {
+		return s.trackOn(tp, g.NativeID, g.Name)
 	}
 	if !ok {
 		return fmt.Sprintf("Task tracking is already off for %s.", g.Name), nil

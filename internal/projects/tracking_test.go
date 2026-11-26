@@ -279,3 +279,37 @@ func TestTrackRefusesProjectInitGroups(t *testing.T) {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+func TestTrackOffWithRepoKeepsProject(t *testing.T) {
+	acme := client.Group{Name: "Acme", Transport: "telegram", NativeID: "-1001"}
+	s, fo, _, _ := trackService(t, acme)
+	if _, err := s.Track("telegram", "Acme", true, false); err != nil {
+		t.Fatal(err)
+	}
+	p, _, _ := s.Store.ProjectForGroup("telegram", "-1001")
+	if err := os.MkdirAll(filepath.Join(p.Path, "app", ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Track("telegram", "Acme", false, true); err == nil {
+		t.Fatal("purge accepted for a folder holding a repo")
+	}
+	if _, err := s.Track("telegram", "Acme", false, false); err != nil {
+		t.Fatal(err)
+	}
+	q, ok, _ := s.Store.ProjectForGroup("telegram", "-1001")
+	if !ok || q.Path != p.Path {
+		t.Fatal("project unbound although its folder holds a repo")
+	}
+	if q.FollowTasks {
+		t.Fatal("follow still on after tracking off")
+	}
+	if c := fo.last(); c.listen != nil || c.follow == nil || *c.follow {
+		t.Fatalf("group_set after off touched listen or left follow on: %+v", c)
+	}
+	if _, err := s.Track("telegram", "Acme", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if q, _, _ := s.Store.ProjectForGroup("telegram", "-1001"); !q.FollowTasks {
+		t.Fatal("tracking on did not turn follow back on")
+	}
+}
