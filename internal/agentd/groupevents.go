@@ -152,7 +152,7 @@ func (a *Agent) scheduleStandup(p store.Project) {
 	}
 	a.standupJobs[p.ID] = true
 	id := p.ID
-	a.Sched.DailyAt(fmt.Sprintf("project-standup-%d", id), 9, 0, projects.StandupZone(), func() {
+	a.Sched.DailyAtNoCatchUp(fmt.Sprintf("project-standup-%d", id), 9, 0, projects.StandupZone(), func() {
 		go a.Projects.StandupByID(id)
 	})
 }

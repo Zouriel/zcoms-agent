@@ -1,3 +1,4 @@
 /zcoms-agent
 *.db
 /dist/
+.zcoms.d/

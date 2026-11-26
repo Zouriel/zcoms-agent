@@ -290,7 +290,7 @@ func (s *Service) standupMessage(p store.Project, open []Task, members []Member)
 			}
 		}
 	}
-	return greeting + "\n" + strings.TrimRight(b.String(), "\n") + "\n\nReply to this message with \"done 3\" (or \"not mine 3\") to update a task.", mentions
+	return greeting + "\n" + strings.TrimRight(b.String(), "\n") + "\n\nReply to this message with \"done\" and the task number (or \"not mine\" and the number) to update a task.", mentions
 }
 
 func strconvQuote(s string) string { return strconv.Quote(s) }

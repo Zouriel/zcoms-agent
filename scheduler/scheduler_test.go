@@ -170,3 +170,27 @@ func TestMemoryStore(t *testing.T) {
 		t.Fatalf("Get after Set = %q, want v", v)
 	}
 }
+
+func TestDailyAtNoCatchUpSeedsTodayOnlyWhenPast(t *testing.T) {
+	now := time.Now()
+	past := now.Add(-time.Hour)
+	future := now.Add(time.Hour)
+	if past.Day() != now.Day() || future.Day() != now.Day() {
+		t.Skip("too close to midnight for this test")
+	}
+	st := NewMemoryStore()
+	s := NewWithStore(st)
+	s.DailyAtNoCatchUp("a", past.Hour(), past.Minute(), now.Location(), func() {})
+	if got, _ := st.Get("a"); got != dateKey(now) {
+		t.Fatalf("past target: guard = %q, want today", got)
+	}
+	s.DailyAtNoCatchUp("b", future.Hour(), future.Minute(), now.Location(), func() {})
+	if got, _ := st.Get("b"); got != "" {
+		t.Fatalf("future target: guard = %q, want empty", got)
+	}
+	_ = st.Set("c", "2000-01-01")
+	s.DailyAtNoCatchUp("c", past.Hour(), past.Minute(), now.Location(), func() {})
+	if got, _ := st.Get("c"); got != "2000-01-01" {
+		t.Fatalf("existing guard changed to %q", got)
+	}
+}

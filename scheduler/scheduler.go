@@ -122,6 +122,24 @@ func (s *Scheduler) DailyAt(name string, hour, min int, tz *time.Location, fn fu
 	})
 }
 
+// DailyAtNoCatchUp is DailyAt for a job that has never fired: when it is
+// first registered after today's hh:mm it waits for tomorrow instead of firing
+// at once (a new project should not get a standup the moment it is bound).
+// Once the job has a recorded day it behaves exactly like DailyAt, so a
+// restart that missed hh:mm still catches up.
+func (s *Scheduler) DailyAtNoCatchUp(name string, hour, min int, tz *time.Location, fn func()) {
+	if tz == nil {
+		tz = time.Local
+	}
+	if last, _ := s.store.Get(name); last == "" {
+		now := time.Now().In(tz)
+		if dueDaily("", now, hour, min) {
+			_ = s.store.Set(name, dateKey(now))
+		}
+	}
+	s.DailyAt(name, hour, min, tz, fn)
+}
+
 // Once runs fn a single time once at is reached (or immediately if at is already
 // in the past and it has not fired yet). The fired flag is persisted so it never
 // runs twice, even across restarts.
