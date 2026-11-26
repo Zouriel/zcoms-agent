@@ -12,8 +12,11 @@ package groups
 
 import (
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -77,6 +80,9 @@ type RunRequest struct {
 // Runner runs one model turn and returns its text.
 type Runner func(RunRequest) (string, error)
 
+// Transcriber turns one audio file into the words spoken in it.
+type Transcriber func(path string) (string, error)
+
 // Call is one group call as the handler sees it.
 type Call struct {
 	Transport  string
@@ -96,20 +102,75 @@ type Call struct {
 	// SenderIsOwner comes from the comms daemon (the sender resolved to the
 	// configured owner), never from message text.
 	SenderIsOwner bool
+	// Voice holds the transcripts of the call's audio files, filled in before
+	// the understand pass. Audio is never attached as a file: the model
+	// passes cannot hear it.
+	Voice []VoiceNote
 }
 
-// Attachments returns the call's readable media files: the calling message's
-// own media, then the quoted message's. Paths a read rule cannot pin to one
-// file are dropped.
+// VoiceNote is one audio attachment after transcription.
+type VoiceNote struct {
+	File string // the audio file, for saying which message it came from
+	Text string // the transcript; empty when it could not be transcribed
+}
+
+// Attachments returns the call's readable non-audio media files: the calling
+// message's own media, then the quoted message's. Paths a read rule cannot
+// pin to one file are dropped. Audio goes through AudioFiles instead.
 func (c Call) Attachments() []string {
 	var out []string
-	for _, f := range []string{c.File, c.ReplyFile} {
-		if f == "" || containsPath(out, f) || len(runner.FileReadRules([]string{f})) == 0 {
-			continue
+	for _, f := range c.media() {
+		if !IsAudio(f) && len(runner.FileReadRules([]string{f})) > 0 {
+			out = append(out, f)
 		}
-		out = append(out, f)
 	}
 	return out
+}
+
+// AudioFiles returns the call's audio attachments (voice notes, audio
+// files), which are transcribed rather than attached.
+func (c Call) AudioFiles() []string {
+	var out []string
+	for _, f := range c.media() {
+		if IsAudio(f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// media lists the call's distinct media paths, calling message first.
+func (c Call) media() []string {
+	var out []string
+	for _, f := range []string{c.File, c.ReplyFile} {
+		if f != "" && !containsPath(out, f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// audioExts are the extensions treated as audio without looking inside.
+var audioExts = map[string]bool{
+	".ogg": true, ".oga": true, ".opus": true, ".mp3": true, ".m4a": true,
+	".wav": true, ".aac": true, ".webm": true, ".flac": true, ".amr": true,
+}
+
+// IsAudio reports whether path is an audio file: by extension, else by
+// sniffing its first bytes.
+func IsAudio(path string) bool {
+	if audioExts[strings.ToLower(filepath.Ext(path))] {
+		return true
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(f, head)
+	ct := http.DetectContentType(head[:n])
+	return ct == "application/ogg" || strings.HasPrefix(ct, "audio/")
 }
 
 func containsPath(list []string, s string) bool {
@@ -149,11 +210,14 @@ type Handler struct {
 	Comms    Comms
 	Policies Policies
 	Run      Runner
-	Projects Projects // nil: project-group calls get the fail reply
-	Seed     func(key string) string
-	Scratch  string // parent of the per-call empty scratch dirs
-	Log      *log.Logger
-	Now      func() time.Time
+	// Transcribe turns voice notes into text before the understand pass.
+	// nil, or a failure, leaves a note asking the caller to type instead.
+	Transcribe Transcriber
+	Projects   Projects // nil: project-group calls get the fail reply
+	Seed       func(key string) string
+	Scratch    string // parent of the per-call empty scratch dirs
+	Log        *log.Logger
+	Now        func() time.Time
 
 	mu     sync.Mutex
 	stamps map[string][]time.Time // admitted calls per group, last hour
@@ -356,6 +420,7 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call) (string, error) {
 	if cleanup != nil {
 		defer cleanup()
 	}
+	c.Voice = h.transcribe(c)
 	// Attached media rides on top of the group's normal tools; a fresh slice
 	// so a shared profile (GeneralProfile) is never mutated.
 	if files := c.Attachments(); len(files) > 0 {
@@ -372,6 +437,37 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call) (string, error) {
 		return "", err
 	}
 	return h.capReply(dir, strings.TrimSpace(out)), nil
+}
+
+// transcribe turns the call's audio files into transcripts. A failure leaves
+// an empty transcript (the prompts then ask the caller to type) and is logged
+// once for the call.
+func (h *Handler) transcribe(c Call) []VoiceNote {
+	files := c.AudioFiles()
+	if len(files) == 0 {
+		return nil
+	}
+	notes := make([]VoiceNote, 0, len(files))
+	var failed []string
+	for _, f := range files {
+		n := VoiceNote{File: f}
+		switch {
+		case h.Transcribe == nil:
+			failed = append(failed, "no transcriber configured")
+		default:
+			text, err := h.Transcribe(f)
+			if err != nil {
+				failed = append(failed, err.Error())
+			} else {
+				n.Text = strings.TrimSpace(text)
+			}
+		}
+		notes = append(notes, n)
+	}
+	if len(failed) > 0 {
+		h.logf("group %s/%s: call %s: voice note not transcribed: %s", c.Transport, c.GroupID, c.MsgID, strings.Join(failed, "; "))
+	}
+	return notes
 }
 
 // EditTools are what the write role adds in a project group.

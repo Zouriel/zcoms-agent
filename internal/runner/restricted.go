@@ -250,7 +250,13 @@ func agyWebOnlyArgs(model, prompt string) []string {
 }
 
 func runRestrictedCmd(bin, dir string, args []string, parse func(string) (RunResult, error)) (RunResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), restrictedRunTimeout)
+	return runCmdTimeout(bin, dir, args, restrictedRunTimeout, parse)
+}
+
+// runCmdTimeout runs one restricted CLI turn in dir, marked as a group call,
+// killed with its whole process group after timeout.
+func runCmdTimeout(bin, dir string, args []string, timeout time.Duration, parse func(string) (RunResult, error)) (RunResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = dir
@@ -262,7 +268,7 @@ func runRestrictedCmd(bin, dir string, args []string, parse func(string) (RunRes
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	runErr := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
-		return RunResult{}, fmt.Errorf("restricted run timed out after %s", restrictedRunTimeout)
+		return RunResult{}, fmt.Errorf("restricted run timed out after %s", timeout)
 	}
 	res, err := parse(strings.TrimSpace(stdout.String()))
 	if err != nil && runErr != nil {

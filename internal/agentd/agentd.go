@@ -226,7 +226,8 @@ func (a *Agent) buildRuntimes() error {
 	}
 	a.Groups = &groups.Handler{
 		Comms: a.Client, Policies: a.Store, Run: a.runRestricted, Projects: a.Projects,
-		Seed: seedFn, Scratch: groupScratch(), Log: a.log,
+		Transcribe: a.transcribeVoice,
+		Seed:       seedFn, Scratch: groupScratch(), Log: a.log,
 	}
 
 	// Migrate the legacy single triage schedule into a "Default" group on first

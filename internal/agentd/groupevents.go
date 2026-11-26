@@ -47,6 +47,21 @@ func (a *Agent) runRestricted(req groups.RunRequest) (string, error) {
 	return res.Text, err
 }
 
+// transcribeVoice turns a group caller's voice note into text on the
+// voice_transcribe persona. Only agy's models hear audio, so a persona that
+// resolves to any other backend (agy missing, or switched in the console)
+// fails, and the call asks the caller to type instead.
+func (a *Agent) transcribeVoice(path string) (string, error) {
+	brain := personas.Brain(a.Store, personas.VoiceTranscribe)
+	if brain.Backend != runner.BackendAgy {
+		if !runner.AgentAvailable(runner.BackendAgy) {
+			return "", runner.ErrAgyMissing
+		}
+		return "", fmt.Errorf("the %s persona is on %q; voice needs agy", personas.VoiceTranscribe, brain.Backend)
+	}
+	return runner.TranscribeAudio(brain.Model, personas.SeedOr(a.Store, personas.VoiceTranscribe), groupScratch(), path)
+}
+
 // groupScratch is the parent of the empty per-call dirs general group calls
 // run in.
 func groupScratch() string {

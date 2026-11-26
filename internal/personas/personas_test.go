@@ -89,3 +89,22 @@ func TestGroupDefaultModels(t *testing.T) {
 		t.Errorf("seeded understand = %s/%s", p.Backend, p.Model)
 	}
 }
+
+// voice_transcribe is seeded on agy (the backend that hears audio) with an
+// agy model, and stays editable like any other row.
+func TestVoiceTranscribeSeededOnAgy(t *testing.T) {
+	s := openTest(t)
+	p, ok, err := s.GetPersona(VoiceTranscribe)
+	if err != nil || !ok {
+		t.Fatalf("voice_transcribe not seeded: %v", err)
+	}
+	if p.Backend != "agy" || p.Model == "" || p.Model != DefaultModel(runner.BackendAgy, VoiceTranscribe) || !ModelFits(runner.BackendAgy, p.Model) {
+		t.Fatalf("seeded voice_transcribe = %s/%s", p.Backend, p.Model)
+	}
+	if p.SeedPrompt == "" {
+		t.Fatal("no seed")
+	}
+	if DefaultBackend(Bridge) != runner.BackendClaude {
+		t.Fatal("other personas must still seed on claude")
+	}
+}
