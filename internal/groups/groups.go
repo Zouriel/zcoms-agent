@@ -484,6 +484,10 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call, outbox string) (answered
 		profile runner.ToolProfile
 		kind    string
 		cleanup func()
+		write   bool
+		// denied is the fixed reply for a change request this caller may
+		// not make; decided here in code, never by a model turn.
+		denied = generalDenial
 	)
 	switch pol.Kind {
 	case store.GroupProject:
@@ -505,7 +509,13 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call, outbox string) (answered
 			break
 		}
 		dir, profile = pc.Dir, pc.Profile
-		write := pc.CanWrite && h.memberRole(c) == store.RoleWrite
+		write = pc.CanWrite && h.memberRole(c) == store.RoleWrite
+		if !write {
+			denied = readOnlyDenial
+			if !pc.CanWrite {
+				denied = projectReadOnlyDenial
+			}
+		}
 		if write {
 			profile = WithEdits(profile)
 		}
@@ -530,7 +540,14 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call, outbox string) (answered
 	if files := c.Attachments(); len(files) > 0 {
 		profile.Files = append(append([]string{}, profile.Files...), files...)
 	}
-	task, lang, ack := h.understand(c, window)
+	u := h.understand(c, window)
+	if u.Changes && !write {
+		// Refuse before any acknowledgement, so the asker is never told the
+		// work has started.
+		a.Text = denied
+		return a, nil
+	}
+	task, lang, ack := u.Task, u.Lang, u.Ack
 	if ack != "" {
 		// Long work: tell the asker it has started, so the wait is not silent.
 		h.reply(c, ack)
@@ -664,11 +681,11 @@ func CutAtSentence(s string, max int) string {
 
 // understand runs the tool-less first pass and returns the English task and
 // the asker's language. Without a model answer it falls back to the raw text.
-func (h *Handler) understand(c Call, window []client.GroupMessage) (task, lang, ack string) {
-	task = strings.TrimSpace(c.Text)
+func (h *Handler) understand(c Call, window []client.GroupMessage) Understood {
+	fallback := Understood{Task: strings.TrimSpace(c.Text)}
 	dir, err := os.MkdirTemp(h.Scratch, "group-understand-*")
 	if err != nil {
-		return task, "", ""
+		return fallback
 	}
 	defer os.RemoveAll(dir)
 	// No tools, except reading exactly the caller's attached files.
@@ -676,14 +693,21 @@ func (h *Handler) understand(c Call, window []client.GroupMessage) (task, lang, 
 		Profile: runner.ToolProfile{Files: c.Attachments()}})
 	if err != nil {
 		h.logf("group %s/%s: understand pass: %v", c.Transport, c.GroupID, err)
-		return task, "", ""
+		return fallback
 	}
 	u := ParseUnderstood(out)
 	switch {
 	case u.None != "":
-		return "The caller did not ask a question (" + u.None + "). Reply with one short, friendly line.", u.Lang, ""
+		return Understood{Task: "The caller did not ask a question (" + u.None + "). Reply with one short, friendly line.", Lang: u.Lang}
 	case u.Task != "":
-		return u.Task, u.Lang, u.Ack
+		return u
 	}
-	return task, u.Lang, ""
+	return Understood{Task: fallback.Task, Lang: u.Lang}
 }
+
+// The fixed replies to a change request the caller may not make.
+const (
+	readOnlyDenial        = "You don't have permission for that: you have read access in this group, so I can't change code, commit or open pull requests for you. Ask the owner to give you write access. I can still look into it and tell you what I find."
+	projectReadOnlyDenial = "I can't do that: this project is set to read-only for me, so I can't make changes for anyone here. I can still look into it and tell you what I find."
+	generalDenial         = "I can't do that here: this group isn't linked to a project, so I can't change code or open pull requests from it. I can still look into it and answer questions."
+)

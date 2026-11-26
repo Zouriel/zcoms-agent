@@ -76,3 +76,59 @@ func TestMemberRoles(t *testing.T) {
 		})
 	}
 }
+
+func TestChangeRequestGate(t *testing.T) {
+	writer := map[string]string{"77": store.RoleWrite}
+	cases := []struct {
+		name     string
+		pc       ProjectContext
+		kind     string
+		sender   string
+		owner    bool
+		roles    map[string]string
+		wantText string // "" means the work pass runs
+	}{
+		{"read member", projectPC(true), store.GroupProject, "77", false, nil, readOnlyDenial},
+		{"write member", projectPC(true), store.GroupProject, "77", false, writer, ""},
+		{"owner", projectPC(true), store.GroupProject, "1", true, nil, ""},
+		{"read-only project", projectPC(false), store.GroupProject, "77", false, writer, projectReadOnlyDenial},
+		{"general group", ProjectContext{}, store.GroupGeneral, "1", true, nil, generalDenial},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &fakeComms{}
+			var work bool
+			h := newHandler(c, nil)
+			h.Run = func(r RunRequest) (string, error) {
+				if r.Persona == UnderstandPersona {
+					return "TASK: fix every test and open a draft PR\nLANG: English\nWORK: long\nCHANGES: yes\nACK: On it, running the tests first.", nil
+				}
+				work = true
+				return "done", nil
+			}
+			h.Scratch = t.TempDir()
+			pol := h.Policies.(fakePolicies)
+			for m, r := range tc.roles {
+				pol["role|telegram|-100|"+m] = store.GroupPolicy{Kind: r}
+			}
+			h.Projects = ctxProjects{tc.pc}
+			ev := groupEvent("-100", "70")
+			ev.SenderID, ev.Text, ev.SenderIsOwner = tc.sender, "fix every test and open a draft PR", tc.owner
+			call, _ := CallFromEvent(ev)
+			h.Process(store.GroupPolicy{Kind: tc.kind, ProjectID: 1}, call)
+			var texts []string
+			for _, s := range c.sends {
+				texts = append(texts, s.text)
+			}
+			if tc.wantText == "" {
+				if !work || len(texts) != 2 || !strings.HasPrefix(texts[0], "On it") {
+					t.Fatalf("work=%v sends=%q, want ack then answer", work, texts)
+				}
+				return
+			}
+			if work || len(texts) != 1 || texts[0] != tc.wantText {
+				t.Fatalf("work=%v sends=%q, want only %q", work, texts, tc.wantText)
+			}
+		})
+	}
+}
