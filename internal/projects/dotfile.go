@@ -34,7 +34,7 @@ type Dotfile struct {
 }
 
 // DefaultUpdatesThread names the updates topic when .zcoms sets none.
-const DefaultUpdatesThread = "Progress updates"
+const DefaultUpdatesThread = "Misc"
 
 // UpdatesThreadFor returns the project's updates topic name from .zcoms.
 func UpdatesThreadFor(folder string) string {
