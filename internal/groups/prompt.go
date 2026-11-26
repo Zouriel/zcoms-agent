@@ -27,7 +27,7 @@ func projectKind(pc ProjectContext, write bool) string {
 	b.WriteString("You can read and search the repo")
 	switch {
 	case write && pc.Profile.HasShell():
-		b.WriteString(" and run commands. The person asking may have you change files in this folder when they ask for it; never commit, push or deploy")
+		b.WriteString(" and run commands. The person asking has write access: when they ask, you may change files in this folder, commit on a new branch, push that branch and open a pull request with gh, then give them the pull request link. Never commit to, push to or merge into the default branch, never force-push, never merge a pull request and never deploy")
 	case write:
 		b.WriteString(". The person asking may have you change files in this folder when they ask for it")
 	case pc.Profile.HasShell():
