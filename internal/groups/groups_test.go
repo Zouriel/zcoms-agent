@@ -23,6 +23,7 @@ type fakeComms struct {
 	// topicErr makes TopicCreate fail; topicID is what it returns.
 	topicErr error
 	topicID  string
+	existing []client.Topic // what TopicList returns
 }
 
 func (f *fakeComms) GroupRead(transport, group string, o client.GroupReadOpts) ([]client.GroupMessage, error) {
@@ -44,6 +45,12 @@ func (f *fakeComms) SendFileWith(transport, to, path, caption string, o client.S
 	defer f.mu.Unlock()
 	f.sends = append(f.sends, sent{transport: transport, to: to, text: caption, replyTo: o.ReplyTo, thread: o.Thread, file: path})
 	return client.Response{OK: true}, nil
+}
+
+func (f *fakeComms) TopicList(transport, group string) ([]client.Topic, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.existing, nil
 }
 
 func (f *fakeComms) TopicCreate(transport, group, name string) (*client.Topic, error) {

@@ -3,6 +3,7 @@ package groups
 import (
 	"errors"
 	"fmt"
+	"github.com/Zouriel/zcoms/client"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -256,5 +257,30 @@ func TestThreadLimit(t *testing.T) {
 	last := c.sends[len(c.sends)-1]
 	if !strings.Contains(last.text, "too many") || last.replyTo != "105" {
 		t.Fatalf("over-limit reply = %+v", last)
+	}
+}
+
+// A THREAD naming an existing topic reuses it; a call already inside a
+// thread never starts another one.
+func TestThreadReuseAndNoNesting(t *testing.T) {
+	c := &fakeComms{existing: []client.Topic{{ID: "33", Name: "Login bug"}}}
+	h := newHandler(c, func(RunRequest) (string, error) { return "Found it.\nTHREAD: login BUG", nil })
+	call, _ := CallFromEvent(groupEvent("-100", "80"))
+	h.Process(store.GroupPolicy{Kind: store.GroupGeneral}, call)
+	if len(c.topics) != 0 {
+		t.Fatalf("created %d topics, want reuse of 33", len(c.topics))
+	}
+	if c.sends[0].thread != "33" {
+		t.Fatalf("answer not in the existing thread: %+v", c.sends)
+	}
+
+	c2 := &fakeComms{}
+	h2 := newHandler(c2, func(RunRequest) (string, error) { return "Sure.\nTHREAD: other", nil })
+	ev := groupEvent("-100", "81")
+	ev.ThreadID = "12"
+	call2, _ := CallFromEvent(ev)
+	h2.Process(store.GroupPolicy{Kind: store.GroupGeneral}, call2)
+	if len(c2.topics) != 0 || c2.sends[0].thread != "12" {
+		t.Fatalf("in-thread call: topics=%v sends=%+v", c2.topics, c2.sends)
 	}
 }

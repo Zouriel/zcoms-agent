@@ -61,6 +61,7 @@ type Comms interface {
 	SendWith(transport, to, text string, o client.SendOptions) (client.Response, error)
 	SendFileWith(transport, to, path, caption string, o client.SendOptions) (client.Response, error)
 	TopicCreate(transport, group, name string) (*client.Topic, error)
+	TopicList(transport, group string) ([]client.Topic, error)
 }
 
 // Policies reads group policies from agent.db.
@@ -398,7 +399,8 @@ func (h *Handler) deliver(c Call, a answered, outbox string) {
 		h.logf("group %s/%s: call %s: attachment %q skipped: %s", c.Transport, c.GroupID, c.MsgID, s.Path, s.Reason)
 	}
 	text := a.Text
-	if name := a.Directives.Thread; name != "" {
+	// A call made inside a thread is answered there; it never starts another.
+	if name := a.Directives.Thread; name != "" && c.ThreadID == "" {
 		tid, note := h.startThread(c, name)
 		if tid != "" {
 			first := text
@@ -421,6 +423,15 @@ func (h *Handler) deliver(c Call, a answered, outbox string) {
 // startThread creates one thread named name in the calling group. It returns
 // the thread id, or "" and a short clause saying why the answer stays here.
 func (h *Handler) startThread(c Call, name string) (string, string) {
+	// Reuse a thread with the same name (case-insensitive) instead of adding a
+	// near-duplicate topic; only a genuinely new name creates one.
+	if ts, err := h.Comms.TopicList(c.Transport, c.GroupID); err == nil {
+		for _, t := range ts {
+			if strings.EqualFold(strings.TrimSpace(t.Name), strings.TrimSpace(name)) && t.ID != "" {
+				return t.ID, ""
+			}
+		}
+	}
 	if !h.topics.allow(c.Transport+"|"+c.GroupID, h.now()) {
 		return "", "(No new thread: too many started this hour.)"
 	}
