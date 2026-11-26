@@ -30,7 +30,7 @@ var errNoBackend = errors.New("no agent CLI can run this turn")
 // runRestricted runs one tool-restricted, never-resumed turn on a persona's
 // brain. A backend that cannot honour the tool profile exactly (codex always
 // has a shell, agy always has web search and can only be pinned to web
-// access) falls back to claude; with neither, the caller gets an error
+// access, never to single attached files) falls back to claude; with neither, the caller gets an error
 // and sends its canned reply.
 func (a *Agent) runRestricted(req groups.RunRequest) (string, error) {
 	brain := personas.Brain(a.Store, req.Persona)

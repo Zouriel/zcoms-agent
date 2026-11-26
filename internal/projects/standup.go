@@ -113,14 +113,23 @@ func (s *Service) Standup(p store.Project, force bool) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("sending the standup: %w", err)
 	}
-	mid := resp.Address
-	if mid == "" && resp.MessageID != 0 {
-		mid = strconv.FormatInt(resp.MessageID, 10)
-	}
-	if err := h.RecordStandup(date, mid, now); err != nil {
+	if err := h.RecordStandup(date, SentID(resp), now); err != nil {
 		return "", err
 	}
 	return "standup sent", nil
+}
+
+// SentID is the platform id of the message a send produced: MsgRef (the
+// final id replies will quote), else the numeric MessageID. Never Address,
+// which names the chat, not the message.
+func SentID(resp client.Response) string {
+	if resp.MsgRef != "" {
+		return resp.MsgRef
+	}
+	if resp.MessageID != 0 {
+		return strconv.FormatInt(resp.MessageID, 10)
+	}
+	return ""
 }
 
 // NewTask is one task the compact pass found.

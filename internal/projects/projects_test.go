@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Zouriel/zcoms/client"
 )
@@ -268,5 +269,27 @@ func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The standup id must be the sent message's MsgRef, so replies quoting it are
+// recognised; Address is the group and would never match.
+func TestStandupRecordsSentMsgRef(t *testing.T) {
+	h, _ := historyWith(t)
+	id := SentID(client.Response{OK: true, Address: "-100123", MsgRef: "9001"})
+	if id != "9001" {
+		t.Fatalf("SentID = %q", id)
+	}
+	if err := h.RecordStandup("2026-11-26", id, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := h.IsStandupMessage("9001"); !ok {
+		t.Fatal("reply to the standup not recognised")
+	}
+	if ok, _ := h.IsStandupMessage("-100123"); ok {
+		t.Fatal("group id taken for the standup message")
+	}
+	if got := SentID(client.Response{MessageID: 7}); got != "7" {
+		t.Fatalf("SentID fallback = %q", got)
 	}
 }

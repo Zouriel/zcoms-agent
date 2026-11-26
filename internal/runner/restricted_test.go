@@ -83,10 +83,72 @@ func TestSupportsAgyOnlyWeb(t *testing.T) {
 		{ToolProfile{Tools: []string{"Read", "Grep", "Glob", "Bash"}, Deny: []string{"Read(**/.env*)"}}, false},
 		{ToolProfile{Tools: []string{"WebSearch", "Bash"}}, false},
 		{ToolProfile{Tools: []string{"WebSearch"}, Deny: []string{"WebFetch(domain:x)"}}, false},
+		// Attached files: agy cannot pin a read to one file, so a web call
+		// with attachments (and the files-only understand pass) go to claude.
+		{ToolProfile{Tools: []string{"WebSearch", "WebFetch"}, Files: []string{"/m/a.jpg"}}, false},
+		{ToolProfile{Files: []string{"/m/a.jpg"}}, false},
 	}
 	for _, c := range cases {
 		if got := Supports(BackendAgy, c.p); got != c.want {
 			t.Errorf("Supports(agy, %v/%v) = %v, want %v", c.p.Tools, c.p.Deny, got, c.want)
 		}
+	}
+}
+
+func TestSupportsCodexWithAttachedFiles(t *testing.T) {
+	if Supports(BackendCodex, ToolProfile{Files: []string{"/m/a.jpg"}}) {
+		t.Error("codex cannot run a files-only (no shell) profile")
+	}
+	if !Supports(BackendCodex, ToolProfile{Tools: []string{"Read", "Bash"}, Files: []string{"/m/a.jpg"}}) {
+		t.Error("codex read-only sandbox can read attached files of a shell profile")
+	}
+}
+
+func flagValue(args []string, flag string) (string, bool) {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1], true
+		}
+	}
+	return "", false
+}
+
+// A profile with attached files and no Read grant gets the Read tool approved
+// for exactly those files and nothing else.
+func TestRestrictedFilesOnlyAllowExactly(t *testing.T) {
+	args := claudeRestrictedArgs("", "hi", ToolProfile{Files: []string{"/m/a.jpg", "/m/b.png"}})
+	tools, _ := flagValue(args, "--tools")
+	if tools != "Read" {
+		t.Fatalf("tools = %q, want Read", tools)
+	}
+	allowed, _ := flagValue(args, "--allowedTools")
+	if allowed != "Read(//m/a.jpg),Read(//m/b.png)" {
+		t.Fatalf("allowedTools = %q", allowed)
+	}
+	deny, _ := flagValue(args, "--disallowedTools")
+	if strings.Contains(","+deny+",", ",Read,") {
+		t.Fatalf("Read denied outright: %s", deny)
+	}
+	for _, want := range []string{"Bash", "Grep", "Glob", "WebSearch", "WebFetch"} {
+		if !strings.Contains(","+deny+",", ","+want+",") {
+			t.Errorf("%s not denied: %s", want, deny)
+		}
+	}
+
+	web := claudeRestrictedArgs("", "hi", ToolProfile{Tools: []string{"WebSearch", "WebFetch"}, Files: []string{"/m/a.jpg"}})
+	if allowed, _ := flagValue(web, "--allowedTools"); allowed != "WebSearch,WebFetch,Read(//m/a.jpg)" {
+		t.Fatalf("web+file allowedTools = %q", allowed)
+	}
+
+	none := claudeRestrictedArgs("", "hi", ToolProfile{Tools: []string{"WebSearch", "WebFetch"}})
+	if tools, _ := flagValue(none, "--tools"); strings.Contains(tools, "Read") {
+		t.Fatalf("no files but Read granted: %q", tools)
+	}
+}
+
+func TestFileReadRulesDropPatterns(t *testing.T) {
+	got := FileReadRules([]string{"relative.jpg", "/m/*.jpg", "/m/a b.jpg", "/m/x,y.jpg", "/m/../m/ok.jpg", ""})
+	if strings.Join(got, "|") != "Read(//m/ok.jpg)" {
+		t.Fatalf("rules = %v", got)
 	}
 }

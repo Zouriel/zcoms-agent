@@ -86,6 +86,34 @@ type Call struct {
 	Text       string
 	Kind       string // "mention" | "reply"
 	ReplyToID  string // the message the call replied to, if any
+	// File and ReplyFile are local paths (owned by zcoms) of the calling
+	// message's media and of the quoted message's media. Both passes may read
+	// exactly these files and nothing else from the group.
+	File      string
+	ReplyFile string
+}
+
+// Attachments returns the call's readable media files: the calling message's
+// own media, then the quoted message's. Paths a read rule cannot pin to one
+// file are dropped.
+func (c Call) Attachments() []string {
+	var out []string
+	for _, f := range []string{c.File, c.ReplyFile} {
+		if f == "" || containsPath(out, f) || len(runner.FileReadRules([]string{f})) == 0 {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+func containsPath(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // ProjectContext is what a project-group call runs with.
@@ -165,6 +193,7 @@ func CallFromEvent(ev client.Event) (Call, bool) {
 		Transport: tp, GroupID: gid, GroupName: ev.GroupName, MsgID: mid,
 		SenderID: ev.SenderID, SenderName: ev.Sender, Text: ev.Text,
 		Kind: ev.Call, ReplyToID: ev.ReplyToID,
+		File: ev.File, ReplyFile: ev.ReplyFile,
 	}, true
 }
 
@@ -239,7 +268,9 @@ func (h *Handler) work(c Call) {
 // Process answers one admitted call synchronously. Exported for tests.
 func (h *Handler) Process(pol store.GroupPolicy, c Call) {
 	_ = h.Policies.TouchGroupCall(c.Transport, c.GroupID, h.now())
-	if pol.Kind == store.GroupProject && h.Projects != nil && c.Kind == "reply" && c.ReplyToID != "" {
+	// Any call quoting a message may be a standup reply, including one that
+	// also @mentions the agent (Kind "mention"); StandupReply checks the id.
+	if pol.Kind == store.GroupProject && h.Projects != nil && c.ReplyToID != "" {
 		if reply, handled := h.Projects.StandupReply(pol.ProjectID, c); handled {
 			if reply != "" {
 				h.reply(c, reply)
@@ -297,6 +328,11 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call) (string, error) {
 	}
 	if cleanup != nil {
 		defer cleanup()
+	}
+	// Attached media rides on top of the group's normal tools; a fresh slice
+	// so a shared profile (GeneralProfile) is never mutated.
+	if files := c.Attachments(); len(files) > 0 {
+		profile.Files = append(append([]string{}, profile.Files...), files...)
 	}
 	task, lang := h.understand(c, window)
 	prompt := BuildPrompt(h.seed(Persona), c, task, lang, window, kind)
@@ -371,7 +407,9 @@ func (h *Handler) understand(c Call, window []client.GroupMessage) (task, lang s
 		return task, ""
 	}
 	defer os.RemoveAll(dir)
-	out, err := h.Run(RunRequest{Persona: UnderstandPersona, Dir: dir, Prompt: UnderstandPrompt(h.seed(UnderstandPersona), c, window)})
+	// No tools, except reading exactly the caller's attached files.
+	out, err := h.Run(RunRequest{Persona: UnderstandPersona, Dir: dir, Prompt: UnderstandPrompt(h.seed(UnderstandPersona), c, window),
+		Profile: runner.ToolProfile{Files: c.Attachments()}})
 	if err != nil {
 		h.logf("group %s/%s: understand pass: %v", c.Transport, c.GroupID, err)
 		return task, ""

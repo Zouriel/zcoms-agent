@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
 	"github.com/Zouriel/zcoms/client"
 )
@@ -297,5 +298,108 @@ func TestUnderstandFallback(t *testing.T) {
 	h.Process(store.GroupPolicy{Kind: store.GroupGeneral}, call)
 	if !strings.Contains(prompt, "what is the capital of France?") || c.sends[0].text != "Paris." {
 		t.Fatalf("fallback lost the message: %q", prompt)
+	}
+}
+
+type fakeProjects struct {
+	standupCalls []Call
+	handled      bool
+}
+
+func (f *fakeProjects) CallContext(int64) (ProjectContext, error) {
+	return ProjectContext{Dir: "", Profile: runner.ToolProfile{Tools: []string{"Read", "Grep", "Glob"}}}, nil
+}
+
+func (f *fakeProjects) StandupReply(_ int64, c Call) (string, bool) {
+	f.standupCalls = append(f.standupCalls, c)
+	return "Marked #3 done.", f.handled
+}
+
+// A reply to the standup that also @mentions the agent arrives as a mention;
+// it must still reach StandupReply.
+func TestStandupReplyThatMentions(t *testing.T) {
+	c := &fakeComms{}
+	ran := false
+	h := newHandler(c, func(RunRequest) (string, error) { ran = true; return "x", nil })
+	fp := &fakeProjects{handled: true}
+	h.Projects = fp
+	ev := groupEvent("-100", "50")
+	ev.Call = "mention"
+	ev.ReplyToID = "40"
+	call, _ := CallFromEvent(ev)
+	h.Process(store.GroupPolicy{Kind: store.GroupProject, ProjectID: 1}, call)
+	if len(fp.standupCalls) != 1 || ran {
+		t.Fatalf("standup reply not tried for a mention: tried=%d ran=%v", len(fp.standupCalls), ran)
+	}
+	if len(c.sends) != 1 || c.sends[0].text != "Marked #3 done." || c.sends[0].replyTo != "50" {
+		t.Fatalf("sends = %+v", c.sends)
+	}
+
+	// No quoted message: never a standup reply.
+	fp.standupCalls = nil
+	call, _ = CallFromEvent(groupEvent("-100", "51"))
+	h.Process(store.GroupPolicy{Kind: store.GroupProject, ProjectID: 1}, call)
+	if len(fp.standupCalls) != 0 || !ran {
+		t.Fatalf("plain mention went to StandupReply: %d", len(fp.standupCalls))
+	}
+}
+
+// Attached media is readable by both passes, exactly those files, and named
+// in both prompts.
+func TestAttachedFilesReachBothPasses(t *testing.T) {
+	c := &fakeComms{}
+	var understand, work RunRequest
+	h := newHandler(c, func(r RunRequest) (string, error) { work = r; return "A cat.", nil })
+	inner := h.Run
+	h.Run = func(r RunRequest) (string, error) {
+		if r.Persona == UnderstandPersona {
+			understand = r
+		}
+		return inner(r)
+	}
+	ev := groupEvent("-100", "60")
+	ev.File = "/media/call.jpg"
+	ev.ReplyFile = "/media/quoted.png"
+	call, _ := CallFromEvent(ev)
+	h.Process(store.GroupPolicy{Kind: store.GroupGeneral}, call)
+
+	want := "/media/call.jpg,/media/quoted.png"
+	if got := strings.Join(understand.Profile.Files, ","); got != want || len(understand.Profile.Tools) != 0 {
+		t.Fatalf("understand profile = %+v", understand.Profile)
+	}
+	if got := strings.Join(work.Profile.Files, ","); got != want {
+		t.Fatalf("work files = %q", got)
+	}
+	if strings.Join(work.Profile.Tools, ",") != "WebSearch,WebFetch" {
+		t.Fatalf("work tools = %v", work.Profile.Tools)
+	}
+	if len(GeneralProfile.Files) != 0 {
+		t.Fatal("GeneralProfile was mutated")
+	}
+	for _, p := range []string{understand.Prompt, work.Prompt} {
+		if !strings.Contains(p, "attached by the caller") || !strings.Contains(p, "/media/call.jpg") || !strings.Contains(p, "/media/quoted.png") {
+			t.Fatalf("prompt does not name the attachments:\n%s", p)
+		}
+	}
+	if !strings.Contains(understand.Prompt, "describe what they show") {
+		t.Fatal("understand prompt does not ask for the image content")
+	}
+}
+
+func TestNoAttachmentNoRead(t *testing.T) {
+	c := &fakeComms{}
+	var reqs []RunRequest
+	h := newHandler(c, func(r RunRequest) (string, error) { return "Paris.", nil })
+	inner := h.Run
+	h.Run = func(r RunRequest) (string, error) { reqs = append(reqs, r); return inner(r) }
+	call, _ := CallFromEvent(groupEvent("-100", "61"))
+	h.Process(store.GroupPolicy{Kind: store.GroupGeneral}, call)
+	if len(reqs) != 2 {
+		t.Fatalf("runs = %d", len(reqs))
+	}
+	for _, r := range reqs {
+		if len(r.Profile.Files) != 0 || containsPath(r.Profile.Tools, "Read") || strings.Contains(r.Prompt, "attached by the caller") {
+			t.Fatalf("%s pass got file access: %+v", r.Persona, r.Profile)
+		}
 	}
 }

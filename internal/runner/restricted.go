@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -31,6 +32,10 @@ type ToolProfile struct {
 	Tools []string
 	// Deny are extra --disallowedTools patterns (e.g. "Read(**/.env*)").
 	Deny []string
+	// Files are absolute paths of single files the run may read on top of
+	// Tools (media a group caller attached). Without "Read" in Tools, the Read
+	// tool is pre-approved only for exactly these files and nothing else.
+	Files []string
 }
 
 // powerTools are the built-in tools denied by rule unless a profile grants
@@ -50,6 +55,7 @@ func (p ToolProfile) HasShell() bool {
 
 // onlyShellAndReads reports whether every tool in the profile is something a
 // read-only Codex sandbox also provides (shell plus reading/searching files).
+// Files count as reads: the read-only sandbox can open them.
 func (p ToolProfile) onlyShellAndReads() bool {
 	if !p.HasShell() {
 		return false
@@ -87,11 +93,12 @@ func Supports(b Backend, p ToolProfile) bool {
 // MCP tools reliably (sub-agents and python workflows included), but cannot
 // remove web search, so a profile with no web grant (the understand pass, a
 // standup) would gain one. Its read_file rules are path prefixes without globs,
-// so a project profile's secret-file denies cannot be expressed, and its
+// so a project profile's secret-file denies and a profile's single attached
+// files cannot be expressed exactly, and its
 // terminal sandbox lets a command escape when permissions are skipped, so a
 // shell cannot be held read-only either. Those profiles stay on claude.
 func (p ToolProfile) onlyWeb() bool {
-	if len(p.Tools) == 0 || len(p.Deny) > 0 {
+	if len(p.Tools) == 0 || len(p.Deny) > 0 || len(p.Files) > 0 {
 		return false
 	}
 	for _, t := range p.Tools {
@@ -105,6 +112,29 @@ func (p ToolProfile) onlyWeb() bool {
 // writeTools are never granted to a restricted run, whatever the profile says.
 var writeTools = []string{"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
+// FileReadRules returns the claude permission rules that allow reading
+// exactly the given files: one Read(//<abs path>) rule per file. Paths that
+// are not absolute, or that carry characters a rule would treat as a pattern,
+// are dropped, so a rule can never match more than its one file.
+func FileReadRules(files []string) []string {
+	var rules []string
+	for _, f := range files {
+		if f == "" || !filepath.IsAbs(f) {
+			continue
+		}
+		f = filepath.ToSlash(filepath.Clean(f))
+		if v := filepath.VolumeName(f); len(v) == 2 && v[1] == ':' {
+			// claude matches Windows paths in POSIX form: C:/x is /c/x.
+			f = "/" + strings.ToLower(v[:1]) + f[2:]
+		}
+		if strings.ContainsAny(f, "*?[]{}()!\\, \t\n\r") {
+			continue
+		}
+		rules = append(rules, "Read(/"+f+")")
+	}
+	return rules
+}
+
 // claudeRestrictedArgs builds the claude flags for a restricted one-shot run.
 func claudeRestrictedArgs(model, prompt string, p ToolProfile) []string {
 	tools := make([]string, 0, len(p.Tools)+1)
@@ -112,6 +142,15 @@ func claudeRestrictedArgs(model, prompt string, p ToolProfile) []string {
 		if !containsStr(writeTools, t) {
 			tools = append(tools, t)
 		}
+	}
+	allowed := append([]string{}, tools...)
+	if rules := FileReadRules(p.Files); len(rules) > 0 {
+		if !containsStr(tools, "Read") {
+			// The tool is present but approved only for these files; in
+			// dontAsk mode every other read is refused.
+			tools = append(tools, "Read")
+		}
+		allowed = append(allowed, rules...)
 	}
 	args := []string{"-p", "--output-format", "json", "--no-session-persistence",
 		// No MCP servers at all: user or connector MCP tools could message
@@ -123,8 +162,8 @@ func claudeRestrictedArgs(model, prompt string, p ToolProfile) []string {
 	if m := strings.TrimSpace(model); m != "" {
 		args = append(args, "--model", m)
 	}
-	if len(tools) > 0 {
-		args = append(args, "--allowedTools", strings.Join(tools, ","))
+	if len(allowed) > 0 {
+		args = append(args, "--allowedTools", strings.Join(allowed, ","))
 	}
 	deny := append([]string{}, writeTools...)
 	for _, t := range powerTools {
