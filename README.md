@@ -67,6 +67,16 @@ comms daemon announces it with a `group_joined` event). Otherwise:
   calls rooted at the folder (the tightest `max_role` of the folder and its
   repos applies). Turning it off keeps the folder and history unless
   `--purge`, and puts the group back to general if it was general before.
+- **Group folder** (agent line `group dir <transport> <group> <absolute
+  folder> [--create]`, the console's folder field). A group with no folder is
+  bound at the chosen folder like `project init` (follow tasks off; unbinding
+  puts a general group back to general). A group with a folder has its
+  `.zcoms` and whole `.zcoms.d/` moved there (WAL checkpointed first; rename,
+  or copy, verify and remove across filesystems), the binding repointed, the
+  managed block moved and the standup rescheduled. Any failed step rolls
+  everything back. The folder must exist (unless `--create`), hold no
+  `.zcoms`/`.zcoms.d`, not overlap another group's folder, and never sit under
+  `~/.config/zcoms`.
 
 **Member roles.** Every group member is `read`: calls get the group's normal
 reach. The owner (the zcoms `owner` contact, marked by the comms daemon) is

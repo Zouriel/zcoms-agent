@@ -63,7 +63,7 @@ func (a *Agent) groupCmd(text string) (string, error) {
 		return "", err
 	}
 	words = words[1:]
-	usage := errors.New("usage: group on|off <telegram|whatsapp> <group> | group track on|off <telegram|whatsapp> <group> [--purge] | group role <telegram|whatsapp> <group> <member id> read|write | group list")
+	usage := errors.New("usage: group on|off <telegram|whatsapp> <group> | group track on|off <telegram|whatsapp> <group> [--purge] | group role <telegram|whatsapp> <group> <member id> read|write | group dir <telegram|whatsapp> <group> <absolute folder> [--create] | group list")
 	if len(words) == 0 {
 		return "", usage
 	}
@@ -89,6 +89,8 @@ func (a *Agent) groupCmd(text string) (string, error) {
 		return a.trackCmd(words[1:])
 	case "role":
 		return a.roleCmd(words[1:])
+	case "dir", "folder":
+		return a.dirCmd(words[1:])
 	case "on", "off":
 	default:
 		return "", usage
@@ -157,6 +159,29 @@ func (a *Agent) trackCmd(words []string) (string, error) {
 		return "", errors.New("--purge only goes with track off")
 	}
 	return a.Projects.Track(tp, strings.Join(pos[2:], " "), on, args.Has("purge"))
+}
+
+// dirCmd handles `group dir <transport> <group> <absolute folder> [--create]`:
+// it gives a group without a folder one, or moves a bound group's folder.
+// Owner only, like every agent.sock line; the path checks live in projects.
+func (a *Agent) dirCmd(words []string) (string, error) {
+	usage := errors.New("usage: group dir <telegram|whatsapp> <group> <absolute folder> [--create]")
+	args, err := cmdline.Parse(words, "create")
+	if err != nil {
+		return "", err
+	}
+	pos := args.Pos
+	if len(pos) < 3 {
+		return "", usage
+	}
+	tp := strings.ToLower(pos[0])
+	if !runner.IsAllowPlatform(tp) {
+		return "", fmt.Errorf("unknown transport %q (want telegram or whatsapp)", pos[0])
+	}
+	if a.Owner == nil {
+		return "", errors.New("the comms daemon is not connected")
+	}
+	return a.Projects.Dir(tp, strings.Join(pos[1:len(pos)-1], " "), pos[len(pos)-1], args.Has("create"))
 }
 
 // roleCmd handles `group role <transport> <group> <member id> read|write`.

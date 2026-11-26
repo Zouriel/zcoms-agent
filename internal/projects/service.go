@@ -52,6 +52,14 @@ type Service struct {
 	Now      func() time.Time
 
 	mu sync.Mutex // one project write path at a time
+	// dirMu keeps readers that open a history database outside mu (the
+	// console detail, a call's notes) off a folder while `group dir` moves it.
+	dirMu sync.RWMutex
+
+	// Test seams for `group dir`: rename replaces os.Rename (to force the
+	// cross-filesystem copy), failAt fails the named step (to drive rollback).
+	rename func(oldpath, newpath string) error
+	failAt func(step string) error
 }
 
 func (s *Service) now() time.Time {
@@ -353,8 +361,18 @@ func (s *Service) remove(p store.Project, purge bool) (string, error) {
 		return "", err
 	}
 	var notes []string
-	if _, err := s.Owner.GroupSet(p.Transport, p.NativeID, boolPtr(false), boolPtr(false)); err != nil {
-		notes = append(notes, "warning: could not turn listening off in comms: "+err.Error())
+	// A folder added to a general group from the console puts it back.
+	listen := p.RestoreGeneral
+	if listen {
+		if err := s.Store.SetGroupPolicy(store.Owner, store.GroupPolicy{
+			Transport: p.Transport, NativeID: p.NativeID, Name: p.GroupName, Kind: store.GroupGeneral,
+		}); err != nil {
+			notes = append(notes, "warning: could not turn the group back to general: "+err.Error())
+			listen = false
+		}
+	}
+	if _, err := s.Owner.GroupSet(p.Transport, p.NativeID, boolPtr(listen), boolPtr(false)); err != nil {
+		notes = append(notes, "warning: could not update listening in comms: "+err.Error())
 	}
 	files, err := StripBlocks(p.Path)
 	if err != nil {
@@ -611,6 +629,8 @@ type Detail struct {
 // Detail reads a project's console view. It only reads: a project whose
 // history database does not exist yet returns the binding alone.
 func (s *Service) Detail(id int64) (Detail, error) {
+	s.dirMu.RLock()
+	defer s.dirMu.RUnlock()
 	p, ok, err := s.Store.GetProject(id)
 	if err != nil {
 		return Detail{}, err

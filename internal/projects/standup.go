@@ -379,6 +379,8 @@ func (s *Service) CallContext(projectID int64) (groups.ProjectContext, error) {
 // seven summaries, the open tasks, and (with a shell) where older history is.
 func (s *Service) callNotes(p store.Project, shell bool) string {
 	var b strings.Builder
+	s.dirMu.RLock()
+	defer s.dirMu.RUnlock()
 	h, err := openExisting(p.Path)
 	if err != nil {
 		return ""

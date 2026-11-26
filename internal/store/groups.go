@@ -401,3 +401,53 @@ func (s *Store) SetGroupRole(c Caller, transport, nativeID, memberID, role strin
 	}
 	return fmt.Errorf("invalid role %q (want read or write)", role)
 }
+
+// GroupFolderEntry is one remembered group folder.
+type GroupFolderEntry struct {
+	Transport string
+	NativeID  string
+	Path      string
+}
+
+// ListGroupFolders returns every remembered group folder.
+func (s *Store) ListGroupFolders() ([]GroupFolderEntry, error) {
+	rows, err := s.db.Query(`SELECT transport, native_id, path FROM group_folders ORDER BY path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GroupFolderEntry
+	for rows.Next() {
+		var e GroupFolderEntry
+		if err := rows.Scan(&e.Transport, &e.NativeID, &e.Path); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// MoveProject repoints a project at another workspace (its new folder) and
+// records that folder as the group's, in one transaction. Owner-only.
+func (s *Store) MoveProject(c Caller, projectID, workspaceID int64, transport, nativeID, folder string) error {
+	if err := requireOwner(c, "projects"); err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.Exec(`UPDATE projects SET workspace_id=?, updated_at=? WHERE id=?`, workspaceID, now(), projectID)
+	if err != nil {
+		return fmt.Errorf("repointing project: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("no project %d", projectID)
+	}
+	if _, err := tx.Exec(`INSERT INTO group_folders(transport, native_id, path, created_at) VALUES(?,?,?,?)
+		ON CONFLICT(transport, native_id) DO UPDATE SET path=excluded.path`, transport, nativeID, folder, now()); err != nil {
+		return fmt.Errorf("recording the group folder: %w", err)
+	}
+	return tx.Commit()
+}
