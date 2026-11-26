@@ -43,6 +43,15 @@ func (f fakePolicies) GetGroupPolicy(transport, id string) (store.GroupPolicy, b
 }
 func (f fakePolicies) TouchGroupCall(string, string, time.Time) error { return nil }
 
+// GroupRole reads a "role|<transport>|<group>|<member>" entry, whose Kind
+// holds the role.
+func (f fakePolicies) GroupRole(transport, id, member string) (string, error) {
+	if p, ok := f["role|"+transport+"|"+id+"|"+member]; ok {
+		return p.Kind, nil
+	}
+	return store.RoleRead, nil
+}
+
 func groupEvent(group, msg string) client.Event {
 	return client.Event{Group: true, Transport: "telegram", Address: group, MsgRef: msg, Sender: "Sara", SenderID: "77", Text: "what is the capital of France?", Call: "mention"}
 }

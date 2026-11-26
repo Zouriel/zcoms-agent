@@ -122,6 +122,11 @@ func (a *Agent) jsonQuery(args []string) (string, error) {
 		v = brains.List()
 	case "group-policies":
 		v, err = a.groupPolicyViews()
+	case "group-roles":
+		if len(args) < 3 {
+			return "", fmt.Errorf("usage: json group-roles <transport> <native id>")
+		}
+		v, err = a.Store.GroupRoles(args[1], args[2])
 	case "projects":
 		v, err = a.Store.ListProjects()
 	case "project":

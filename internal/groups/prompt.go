@@ -21,14 +21,23 @@ func tasksKind(pc ProjectContext) string {
 	return generalKind + "\n\n" + strings.TrimSpace(pc.Notes)
 }
 
-func projectKind(pc ProjectContext) string {
+func projectKind(pc ProjectContext, write bool) string {
 	var b strings.Builder
 	b.WriteString("This is a project group chat for the code in your working directory. ")
 	b.WriteString("You can read and search the repo")
-	if pc.Profile.HasShell() {
+	switch {
+	case write && pc.Profile.HasShell():
+		b.WriteString(" and run commands. The person asking may have you change files in this folder when they ask for it; never commit, push or deploy")
+	case write:
+		b.WriteString(". The person asking may have you change files in this folder when they ask for it")
+	case pc.Profile.HasShell():
 		b.WriteString(" and run commands to inspect it (never change files, commit, push or deploy)")
 	}
-	b.WriteString(". You cannot edit files, and you cannot message anyone.")
+	if write {
+		b.WriteString(". You cannot message anyone.")
+	} else {
+		b.WriteString(". You cannot edit files, and you cannot message anyone.")
+	}
 	if strings.TrimSpace(pc.Notes) != "" {
 		b.WriteString("\n\n")
 		b.WriteString(strings.TrimSpace(pc.Notes))

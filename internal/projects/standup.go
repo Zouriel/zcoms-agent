@@ -370,7 +370,7 @@ func (s *Service) CallContext(projectID int64) (groups.ProjectContext, error) {
 		}
 		role = s.trackedRole(p, repos)
 	}
-	pc := groups.ProjectContext{Dir: p.Path, Profile: Profile(role), MaxRole: role}
+	pc := groups.ProjectContext{Dir: p.Path, Profile: Profile(role), MaxRole: role, CanWrite: roleRank(role) >= roleRank("edit")}
 	pc.Notes = s.callNotes(p, pc.Profile.HasShell())
 	return pc, nil
 }

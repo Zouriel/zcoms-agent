@@ -55,3 +55,31 @@ func TestProjectBindingByPath(t *testing.T) {
 		t.Fatal("policy survived project removal")
 	}
 }
+
+func TestGroupRoles(t *testing.T) {
+	s := openTest(t)
+	if r, err := s.GroupRole("telegram", "-100", "77"); err != nil || r != RoleRead {
+		t.Fatalf("default role = %q %v", r, err)
+	}
+	if err := s.SetGroupRole(Agent, "telegram", "-100", "77", RoleWrite); err == nil {
+		t.Fatal("agent set a role")
+	}
+	if err := s.SetGroupRole(Owner, "telegram", "-100", "77", "admin"); err == nil {
+		t.Fatal("bad role accepted")
+	}
+	if err := s.SetGroupRole(Owner, "telegram", "-100", "77", RoleWrite); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := s.GroupRole("telegram", "-100", "77"); r != RoleWrite {
+		t.Fatalf("role = %q", r)
+	}
+	if r, _ := s.GroupRole("telegram", "-200", "77"); r != RoleRead {
+		t.Fatal("role leaked to another group")
+	}
+	if err := s.SetGroupRole(Owner, "telegram", "-100", "77", RoleRead); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := s.GroupRoles("telegram", "-100"); len(m) != 0 {
+		t.Fatalf("read left a row: %v", m)
+	}
+}

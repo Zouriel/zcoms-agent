@@ -336,3 +336,68 @@ func (s *Store) DeleteGroupFolder(c Caller, transport, nativeID string) error {
 	_, err := s.db.Exec(`DELETE FROM group_folders WHERE transport=? AND native_id=?`, transport, nativeID)
 	return err
 }
+
+// Member roles in a group. Every member is RoleRead unless the owner made
+// them RoleWrite; the owner is always write (decided by the caller from the
+// comms daemon's owner mark, never stored).
+const (
+	RoleRead  = "read"
+	RoleWrite = "write"
+)
+
+// GroupRole returns a member's role in a group, RoleRead when none is set.
+func (s *Store) GroupRole(transport, nativeID, memberID string) (string, error) {
+	var role string
+	err := s.db.QueryRow(`SELECT role FROM group_roles WHERE transport=? AND native_id=? AND member_id=?`,
+		transport, nativeID, memberID).Scan(&role)
+	if err == sql.ErrNoRows {
+		return RoleRead, nil
+	}
+	if err != nil {
+		return RoleRead, err
+	}
+	if role != RoleWrite {
+		return RoleRead, nil
+	}
+	return role, nil
+}
+
+// GroupRoles returns the members of a group with a role other than read.
+func (s *Store) GroupRoles(transport, nativeID string) (map[string]string, error) {
+	rows, err := s.db.Query(`SELECT member_id, role FROM group_roles WHERE transport=? AND native_id=?`, transport, nativeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var m, r string
+		if err := rows.Scan(&m, &r); err != nil {
+			return nil, err
+		}
+		out[m] = r
+	}
+	return out, rows.Err()
+}
+
+// SetGroupRole sets a member's role in a group. Owner-only; read removes the
+// row, since read is everyone's default.
+func (s *Store) SetGroupRole(c Caller, transport, nativeID, memberID, role string) error {
+	if err := requireOwner(c, "group_roles"); err != nil {
+		return err
+	}
+	if transport == "" || nativeID == "" || strings.TrimSpace(memberID) == "" {
+		return fmt.Errorf("a group role needs a transport, a group and a member")
+	}
+	switch role {
+	case RoleRead:
+		_, err := s.db.Exec(`DELETE FROM group_roles WHERE transport=? AND native_id=? AND member_id=?`, transport, nativeID, memberID)
+		return err
+	case RoleWrite:
+		_, err := s.db.Exec(`INSERT INTO group_roles(transport, native_id, member_id, role, updated_at) VALUES(?,?,?,?,?)
+			ON CONFLICT(transport, native_id, member_id) DO UPDATE SET role=excluded.role, updated_at=excluded.updated_at`,
+			transport, nativeID, memberID, role, now())
+		return err
+	}
+	return fmt.Errorf("invalid role %q (want read or write)", role)
+}

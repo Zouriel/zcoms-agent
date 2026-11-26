@@ -53,3 +53,19 @@ func TestTrackCmdUsage(t *testing.T) {
 		}
 	}
 }
+
+func TestRoleCmdUsage(t *testing.T) {
+	a := testAgent(t)
+	for _, line := range []string{
+		"group role", "group role telegram Acme 77", "group role telegram Acme 77 admin",
+		"group role signal Acme 77 write",
+	} {
+		if _, err := a.groupCmd(line); err == nil {
+			t.Errorf("%q: no error", line)
+		}
+	}
+	// The store refuses a role set by anyone but the owner.
+	if err := a.Store.SetGroupRole(store.Agent, "telegram", "-100", "77", store.RoleWrite); err == nil {
+		t.Fatal("agent caller set a role")
+	}
+}

@@ -68,6 +68,17 @@ comms daemon announces it with a `group_joined` event). Otherwise:
   repos applies). Turning it off keeps the folder and history unless
   `--purge`, and puts the group back to general if it was general before.
 
+**Member roles.** Every group member is `read`: calls get the group's normal
+reach. The owner (the zcoms `owner` contact, marked by the comms daemon) is
+always `write`; anyone else is made `write` per group from the console (agent
+line `group role <transport> <group> <member id> read|write`). In a group
+whose folder holds a repo, a write member's call also gets Edit/Write tools,
+still capped by the workspace `max_role` (read or confirm: no edits). In
+general groups and tasks groups without a repo, write changes nothing. The
+role is decided in code from the sender id; message text never changes it,
+and write never allows errands, reminders, messaging anyone, or changing
+bindings, policies or personas.
+
 Every call runs two passes: `group_understand` (top model, no tools) restates
 the message in English, in any language including Dhivehi; `group` (lower
 model, the group's tools) writes the reply. Both are ordinary personas.

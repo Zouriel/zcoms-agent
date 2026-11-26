@@ -62,6 +62,8 @@ type Comms interface {
 type Policies interface {
 	GetGroupPolicy(transport, nativeID string) (store.GroupPolicy, bool, error)
 	TouchGroupCall(transport, nativeID string, at time.Time) error
+	// GroupRole is a member's role in a group (store.RoleRead by default).
+	GroupRole(transport, nativeID, memberID string) (string, error)
 }
 
 // RunRequest is one restricted model turn.
@@ -91,6 +93,9 @@ type Call struct {
 	// exactly these files and nothing else from the group.
 	File      string
 	ReplyFile string
+	// SenderIsOwner comes from the comms daemon (the sender resolved to the
+	// configured owner), never from message text.
+	SenderIsOwner bool
 }
 
 // Attachments returns the call's readable media files: the calling message's
@@ -122,6 +127,9 @@ type ProjectContext struct {
 	Profile runner.ToolProfile // read, search, maybe shell; never edit
 	Notes   string             // recent summaries, open tasks, history db path
 	MaxRole string             // the workspace ceiling the profile was built under
+	// CanWrite says the ceiling allows edits (max_role edit, full or none), so
+	// a write member's call may get the edit tools.
+	CanWrite bool
 	// General is set for a tracked group whose folder holds no repo: the call
 	// runs like a general group (web only, empty scratch dir) with Notes added.
 	General bool
@@ -198,6 +206,7 @@ func CallFromEvent(ev client.Event) (Call, bool) {
 		SenderID: ev.SenderID, SenderName: ev.Sender, Text: ev.Text,
 		Kind: ev.Call, ReplyToID: ev.ReplyToID,
 		File: ev.File, ReplyFile: ev.ReplyFile,
+		SenderIsOwner: ev.SenderIsOwner,
 	}, true
 }
 
@@ -330,7 +339,11 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call) (string, error) {
 			break
 		}
 		dir, profile = pc.Dir, pc.Profile
-		kind = projectKind(pc)
+		write := pc.CanWrite && h.memberRole(c) == store.RoleWrite
+		if write {
+			profile = WithEdits(profile)
+		}
+		kind = projectKind(pc, write)
 	default:
 		d, err := os.MkdirTemp(h.Scratch, "group-call-*")
 		if err != nil {
@@ -355,6 +368,34 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call) (string, error) {
 		return "", err
 	}
 	return h.capReply(dir, strings.TrimSpace(out)), nil
+}
+
+// EditTools are what the write role adds in a project group.
+var EditTools = []string{"Edit", "Write", "MultiEdit"}
+
+// WithEdits returns a copy of p with the edit tools added.
+func WithEdits(p runner.ToolProfile) runner.ToolProfile {
+	out := p
+	out.Tools = append(append([]string{}, p.Tools...), EditTools...)
+	return out
+}
+
+// memberRole decides the caller's role in code, before the runner starts:
+// the owner (as marked by the comms daemon) is always write; anyone else has
+// the role the owner stored for them, read by default. A lookup error is read.
+func (h *Handler) memberRole(c Call) string {
+	if c.SenderIsOwner {
+		return store.RoleWrite
+	}
+	if c.SenderID == "" {
+		return store.RoleRead
+	}
+	r, err := h.Policies.GroupRole(c.Transport, c.GroupID, c.SenderID)
+	if err != nil {
+		h.logf("group %s/%s: role lookup: %v", c.Transport, c.GroupID, err)
+		return store.RoleRead
+	}
+	return r
 }
 
 // GeneralProfile is the only reach a general group call has: web search and

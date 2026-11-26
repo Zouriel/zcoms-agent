@@ -100,3 +100,11 @@ func (c *Client) ProjectDetail(id int64) (ProjectDetail, error) {
 	var out ProjectDetail
 	return out, c.queryJSON("project "+strconv.FormatInt(id, 10), &out)
 }
+
+// GroupRoles returns the members of a group whose role is not the default
+// read, keyed by member platform id. The owner is always write and is not
+// listed; the comms daemon marks them in the member list instead.
+func (c *Client) GroupRoles(transport, nativeID string) (map[string]string, error) {
+	out := map[string]string{}
+	return out, c.queryJSON("group-roles "+transport+" "+nativeID, &out)
+}

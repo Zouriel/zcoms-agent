@@ -63,7 +63,7 @@ func (a *Agent) groupCmd(text string) (string, error) {
 		return "", err
 	}
 	words = words[1:]
-	usage := errors.New("usage: group on|off <telegram|whatsapp> <group> | group track on|off <telegram|whatsapp> <group> [--purge] | group list")
+	usage := errors.New("usage: group on|off <telegram|whatsapp> <group> | group track on|off <telegram|whatsapp> <group> [--purge] | group role <telegram|whatsapp> <group> <member id> read|write | group list")
 	if len(words) == 0 {
 		return "", usage
 	}
@@ -87,6 +87,8 @@ func (a *Agent) groupCmd(text string) (string, error) {
 		return strings.TrimRight(b.String(), "\n"), nil
 	case "track":
 		return a.trackCmd(words[1:])
+	case "role":
+		return a.roleCmd(words[1:])
 	case "on", "off":
 	default:
 		return "", usage
@@ -155,6 +157,63 @@ func (a *Agent) trackCmd(words []string) (string, error) {
 		return "", errors.New("--purge only goes with track off")
 	}
 	return a.Projects.Track(tp, strings.Join(pos[2:], " "), on, args.Has("purge"))
+}
+
+// roleCmd handles `group role <transport> <group> <member id> read|write`.
+// Owner only (agent.sock); the store refuses any other caller as well. The
+// owner's own role is fixed at write and cannot be set.
+func (a *Agent) roleCmd(words []string) (string, error) {
+	usage := errors.New("usage: group role <telegram|whatsapp> <group> <member id> read|write")
+	if len(words) < 4 {
+		return "", usage
+	}
+	role := strings.ToLower(words[len(words)-1])
+	member := strings.TrimSpace(words[len(words)-2])
+	if role != store.RoleRead && role != store.RoleWrite {
+		return "", usage
+	}
+	tp := strings.ToLower(words[0])
+	if !runner.IsAllowPlatform(tp) {
+		return "", fmt.Errorf("unknown transport %q (want telegram or whatsapp)", words[0])
+	}
+	if a.Owner == nil {
+		return "", errors.New("the comms daemon is not connected")
+	}
+	g, err := a.Owner.GroupGet(tp, strings.Join(words[1:len(words)-2], " "))
+	if err != nil {
+		return "", err
+	}
+	if g == nil {
+		return "", fmt.Errorf("no %s group called %q", tp, strings.Join(words[1:len(words)-2], " "))
+	}
+	ms, err := a.Owner.GroupMembers(tp, g.NativeID)
+	if err != nil {
+		return "", fmt.Errorf("reading the group's members: %w", err)
+	}
+	var name string
+	found := false
+	for _, m := range ms {
+		if m.ID != member {
+			continue
+		}
+		if m.IsOwner {
+			return "", errors.New("the owner is always write in every group")
+		}
+		if m.IsSelf {
+			return "", errors.New("that is the agent's own account")
+		}
+		name, found = m.Name, true
+	}
+	if !found {
+		return "", fmt.Errorf("%s is not a member of %s", member, g.Name)
+	}
+	if err := a.Store.SetGroupRole(store.Owner, tp, g.NativeID, member, role); err != nil {
+		return "", err
+	}
+	if name == "" {
+		name = member
+	}
+	return fmt.Sprintf("%s is now %s in %s.", name, role, g.Name), nil
 }
 
 // groupPolicyView is a group policy as the console and `group list` show it:

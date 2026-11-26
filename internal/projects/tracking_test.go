@@ -161,9 +161,21 @@ func TestTrackedKindFollowsRepo(t *testing.T) {
 	if err != nil || pc.General || pc.Dir != p.Path || !pc.Profile.HasShell() {
 		t.Fatalf("repo call context = %+v %v", pc, err)
 	}
+	if !pc.CanWrite {
+		t.Fatal("an uncapped workspace refused edits")
+	}
 	ws, ok, _ := s.Store.GetWorkspaceByPath(repo)
 	if !ok {
 		t.Fatal("repo not registered as a workspace")
+	}
+	for role, want := range map[string]bool{"confirm": false, "edit": true, "full": true} {
+		r := role
+		if err := s.Store.UpdateWorkspace(store.Owner, ws.ID, nil, &r, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		if pc, _ = s.CallContext(p.ID); pc.CanWrite != want {
+			t.Fatalf("max_role %s: CanWrite = %v", role, pc.CanWrite)
+		}
 	}
 	// The repo's max_role caps the folder.
 	role := "read"
@@ -171,7 +183,7 @@ func TestTrackedKindFollowsRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	pc, _ = s.CallContext(p.ID)
-	if pc.Profile.HasShell() || pc.MaxRole != "read" {
+	if pc.Profile.HasShell() || pc.MaxRole != "read" || pc.CanWrite {
 		t.Fatalf("max_role read still gave a shell: %+v", pc)
 	}
 }
