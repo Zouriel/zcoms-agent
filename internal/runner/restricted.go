@@ -83,9 +83,19 @@ func Supports(b Backend, p ToolProfile) bool {
 	case BackendCodex:
 		return p.onlyShellAndReads()
 	case BackendAgy:
-		return p.onlyWeb()
+		return p.onlyWeb() || p.noToolsButFiles()
 	}
 	return true
+}
+
+// noToolsButFiles reports a profile with no tools at all beyond reading the
+// caller's attached files (the understand pass, a standup's compaction). agy
+// holds that shape by running in an empty dir holding only copies of those
+// files, with reads outside it, shell, writes, MCP and browser denied. Its web
+// search stays on; the run holds no private data to send anywhere, only the
+// group's own messages.
+func (p ToolProfile) noToolsButFiles() bool {
+	return len(p.Tools) == 0 && len(p.Deny) == 0
 }
 
 // onlyWeb reports whether the profile is web access and nothing else, the one
@@ -198,10 +208,31 @@ func RunRestricted(brain Brain, dir, prompt string, p ToolProfile) (RunResult, e
 		}
 		return runCodexReadOnly(brain.Model, dir, prompt)
 	case BackendAgy:
-		if !p.onlyWeb() {
+		args := agyWebOnlyArgs(brain.Model, prompt)
+		switch {
+		case p.onlyWeb():
+		case p.noToolsButFiles():
+			// Always a fresh empty dir of our own (the caller's dir may be a
+			// project folder): the attachments are copied in and the prompt
+			// points at the copies, so agy reads nothing else.
+			own, err := os.MkdirTemp("", "zcoms-agy-notools-*")
+			if err != nil {
+				return RunResult{}, err
+			}
+			defer os.RemoveAll(own)
+			dir = own
+			for i, f := range p.Files {
+				cp := filepath.Join(dir, fmt.Sprintf("attachment-%d%s", i+1, filepath.Ext(f)))
+				if err := copyFile(f, cp); err != nil {
+					return RunResult{}, fmt.Errorf("copying an attachment: %w", err)
+				}
+				prompt = strings.ReplaceAll(prompt, f, cp)
+			}
+			args = agyTranscribeArgs(brain.Model, dir, prompt)
+		default:
 			return RunResult{}, ErrProfileUnsupported
 		}
-		res, err := runRestrictedCmd(agyBin, dir, agyWebOnlyArgs(brain.Model, prompt), func(out string) (RunResult, error) {
+		res, err := runRestrictedCmd(agyBin, dir, args, func(out string) (RunResult, error) {
 			noteAgyAuth(out)
 			res, err := parseAgyJSON(out, "")
 			return RunResult{Text: res.Text}, err

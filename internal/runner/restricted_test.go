@@ -76,17 +76,19 @@ func TestSupportsAgyOnlyWeb(t *testing.T) {
 		p    ToolProfile
 		want bool
 	}{
-		{ToolProfile{}, false},
+		// No tools (the understand pass) runs in an empty dir of its own.
+		{ToolProfile{}, true},
 		{ToolProfile{Tools: []string{"WebSearch", "WebFetch"}}, true},
 		{ToolProfile{Tools: []string{"WebSearch"}}, true},
 		{ToolProfile{Tools: []string{"Read", "Grep", "Glob"}}, false},
 		{ToolProfile{Tools: []string{"Read", "Grep", "Glob", "Bash"}, Deny: []string{"Read(**/.env*)"}}, false},
 		{ToolProfile{Tools: []string{"WebSearch", "Bash"}}, false},
 		{ToolProfile{Tools: []string{"WebSearch"}, Deny: []string{"WebFetch(domain:x)"}}, false},
-		// Attached files: agy cannot pin a read to one file, so a web call
-		// with attachments (and the files-only understand pass) go to claude.
+		// Attached files: agy cannot pin a read to one file in place, so a web
+		// call with attachments goes to claude; a files-only (no tools) run gets
+		// copies of the files in its own empty dir.
 		{ToolProfile{Tools: []string{"WebSearch", "WebFetch"}, Files: []string{"/m/a.jpg"}}, false},
-		{ToolProfile{Files: []string{"/m/a.jpg"}}, false},
+		{ToolProfile{Files: []string{"/m/a.jpg"}}, true},
 	}
 	for _, c := range cases {
 		if got := Supports(BackendAgy, c.p); got != c.want {

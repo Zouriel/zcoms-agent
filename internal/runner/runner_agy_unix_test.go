@@ -79,7 +79,7 @@ func TestRunRestrictedAgyWebOnly(t *testing.T) {
 		t.Error("group-call marker missing from env")
 	}
 
-	if _, err := RunRestricted(Brain{Backend: BackendAgy}, t.TempDir(), "hi", ToolProfile{}); err != ErrProfileUnsupported {
-		t.Fatalf("tool-less profile on agy = %v, want ErrProfileUnsupported", err)
+	if _, err := RunRestricted(Brain{Backend: BackendAgy}, t.TempDir(), "hi", ToolProfile{Tools: []string{"Read", "Bash"}}); err != ErrProfileUnsupported {
+		t.Fatalf("project profile on agy = %v, want ErrProfileUnsupported", err)
 	}
 }
