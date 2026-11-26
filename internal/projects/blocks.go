@@ -30,19 +30,41 @@ func TransportLabel(t string) string {
 }
 
 // BlockText renders the managed block for a group. Names and platform only:
-// no ids, so the block cannot be used to repoint the binding.
+// no ids, so the block cannot be used to repoint the binding. It tells coding
+// agents to keep the main chat for milestones and to put screenshots, files
+// and step-by-step progress in a thread.
 func BlockText(transport, group string) string {
-	return strings.Join([]string{
+	lines := []string{
 		blockBegin,
 		"## zcoms project group",
 		"",
 		fmt.Sprintf("This repo is bound to the %s group %q.", TransportLabel(transport), group),
 		"",
 		"When the user asks for an update (\"update me on tele\", \"let me know when it's done\"),",
-		"send it to the project group with zc project say \"<text>\".",
-		"Do not message the user privately about this project.",
-		blockEnd,
-	}, "\n")
+		"send it to the project group with zc project say, not privately.",
+		"",
+	}
+	if transport == "whatsapp" {
+		lines = append(lines,
+			"WhatsApp groups have no threads, so keep group posts to important milestones:",
+			"done, blocked, or a decision needed: zc project say \"<text>\".",
+			"Send screenshots or files only when asked: zc project say --file <path> \"<caption>\".",
+		)
+	} else {
+		lines = append(lines,
+			"Screenshots, files and step-by-step progress go to a thread, not the main chat:",
+			"zc project say --thread \"<short topic for the work>\" --file <path> \"<caption>\"",
+			"(--file is optional and may repeat; photos are sent as photos, 20 MB each).",
+			"Reuse the same thread name for the same piece of work; the command creates the",
+			"thread if it does not exist.",
+			"Post in the main chat (zc project say \"<text>\" without --thread) only for important",
+			"milestones: done, blocked, or a decision needed.",
+			"When you finish UI work, take a screenshot of the running app (for example",
+			"npx playwright screenshot --full-page <url> /tmp/<name>.png) and post it to the thread.",
+		)
+	}
+	lines = append(lines, "Do not message the user privately about this project.", blockEnd)
+	return strings.Join(lines, "\n")
 }
 
 // UpsertBlock returns content with the managed block replaced (between the
@@ -181,8 +203,12 @@ func StripBlocks(folder string) ([]string, error) {
 // bound folder: requested progress updates go to the project group, ordinary
 // replies stay in the private chat.
 func SessionNote(p store.Project) string {
+	threads := "Put screenshots, files and step-by-step progress in a thread (`zc project say --thread \"<topic>\" --file <path> \"<caption>\"`) and keep the main chat for milestones. "
+	if p.Transport == "whatsapp" {
+		threads = "WhatsApp has no threads, so post only milestones, and screenshots only when asked (`zc project say --file <path> \"<caption>\"`). "
+	}
 	return fmt.Sprintf("This folder is bound to the %s group %q. When the owner asks you for a progress update "+
 		"or to tell them when something is done, send that update to the group with `zc project say \"<text>\"` "+
-		"instead of messaging them privately. Your ordinary replies in this chat stay here.",
+		"instead of messaging them privately. "+threads+"Your ordinary replies in this chat stay here.",
 		TransportLabel(p.Transport), p.GroupName)
 }

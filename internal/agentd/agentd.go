@@ -231,7 +231,8 @@ func (a *Agent) buildRuntimes() error {
 		Run: func(persona, dir, prompt string) (string, error) {
 			return a.runRestricted(groups.RunRequest{Persona: persona, Dir: dir, Prompt: personas.SeedOr(a.Store, persona) + "\n\n" + prompt})
 		},
-		OnFollow: a.scheduleStandup,
+		OnFollow:  a.scheduleStandup,
+		OwnerChat: func() string { return a.settings.MainUser },
 	}
 	a.Groups = &groups.Handler{
 		Comms: a.Client, Policies: a.Store, Run: a.runRestricted, Projects: a.Projects,

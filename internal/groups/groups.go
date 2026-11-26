@@ -58,7 +58,9 @@ const FailReply = "Sorry, I could not answer that one right now."
 // agent-caller client, so the daemon applies its own group_read limits.
 type Comms interface {
 	GroupRead(transport, group string, o client.GroupReadOpts) ([]client.GroupMessage, error)
-	SendOpts(transport, to, text, replyTo string, mentions []string) (client.Response, error)
+	SendWith(transport, to, text string, o client.SendOptions) (client.Response, error)
+	SendFileWith(transport, to, path, caption string, o client.SendOptions) (client.Response, error)
+	TopicCreate(transport, group, name string) (*client.Topic, error)
 }
 
 // Policies reads group policies from agent.db.
@@ -94,6 +96,9 @@ type Call struct {
 	Text       string
 	Kind       string // "mention" | "reply"
 	ReplyToID  string // the message the call replied to, if any
+	// ThreadID is the thread (Telegram forum topic) the call was made in;
+	// replies go back into it. Empty outside a thread.
+	ThreadID string
 	// File and ReplyFile are local paths (owned by zcoms) of the calling
 	// message's media and of the quoted message's media. Both passes may read
 	// exactly these files and nothing else from the group.
@@ -221,6 +226,7 @@ type Handler struct {
 
 	mu     sync.Mutex
 	stamps map[string][]time.Time // admitted calls per group, last hour
+	topics topicLimiter           // new threads per group, last hour
 
 	semOnce sync.Once
 	sem     chan struct{}
@@ -268,7 +274,7 @@ func CallFromEvent(ev client.Event) (Call, bool) {
 	return Call{
 		Transport: tp, GroupID: gid, GroupName: ev.GroupName, MsgID: mid,
 		SenderID: ev.SenderID, SenderName: ev.Sender, Text: ev.Text,
-		Kind: ev.Call, ReplyToID: ev.ReplyToID,
+		Kind: ev.Call, ReplyToID: ev.ReplyToID, ThreadID: ev.ThreadID,
 		File: ev.File, ReplyFile: ev.ReplyFile,
 		SenderIsOwner: ev.SenderIsOwner,
 	}, true
@@ -355,23 +361,108 @@ func (h *Handler) Process(pol store.GroupPolicy, c Call) {
 			return
 		}
 	}
-	text, err := h.answer(pol, c)
+	// Every call gets its own empty outbox; the model may leave files there
+	// and list them with ATTACH lines. It is removed once the call is done.
+	outbox, err := os.MkdirTemp(h.Scratch, "group-outbox-*")
+	if err != nil {
+		h.logf("group %s/%s: outbox: %v", c.Transport, c.GroupID, err)
+		outbox = ""
+	} else {
+		defer os.RemoveAll(outbox)
+	}
+	ans, err := h.answer(pol, c, outbox)
 	if err != nil {
 		h.logf("group %s/%s: answer failed: %v", c.Transport, c.GroupID, err)
-		text = FailReply
+		h.reply(c, FailReply)
+		return
 	}
-	h.reply(c, text)
+	h.deliver(c, ans, outbox)
 }
 
-// reply sends text to the calling group, quoting the calling message. The
-// target comes from the call, never from model output.
+// answered is a work pass's result: the reply text, the code-handled
+// directives, and the project folder ATTACH paths may come from ("" for a
+// general group).
+type answered struct {
+	Text       string
+	Directives Directives
+	ProjectDir string
+}
+
+// deliver posts an answer. Everything goes to the calling group only: the
+// group id comes from the call, never from model output. A THREAD request
+// creates at most one thread, in the calling group, and posts the answer
+// there with a one-line pointer quoting the call; files follow the answer.
+func (h *Handler) deliver(c Call, a answered, outbox string) {
+	files, skipped := ValidateAttachments(a.Directives.Attach, outbox, a.ProjectDir)
+	for _, s := range skipped {
+		h.logf("group %s/%s: call %s: attachment %q skipped: %s", c.Transport, c.GroupID, c.MsgID, s.Path, s.Reason)
+	}
+	text := a.Text
+	if name := a.Directives.Thread; name != "" {
+		tid, note := h.startThread(c, name)
+		if tid != "" {
+			first := text
+			if _, err := h.Comms.SendWith(c.Transport, c.GroupID, first, client.SendOptions{Thread: tid}); err != nil {
+				h.logf("group %s/%s: send in new thread failed: %v", c.Transport, c.GroupID, err)
+				h.reply(c, text)
+				h.sendFiles(c, files, c.ThreadID, c.MsgID)
+				return
+			}
+			h.reply(c, fmt.Sprintf("I started a thread for this: %s.", name))
+			h.sendFiles(c, files, tid, "")
+			return
+		}
+		text = strings.TrimSpace(text + " " + note)
+	}
+	h.reply(c, text)
+	h.sendFiles(c, files, c.ThreadID, c.MsgID)
+}
+
+// startThread creates one thread named name in the calling group. It returns
+// the thread id, or "" and a short clause saying why the answer stays here.
+func (h *Handler) startThread(c Call, name string) (string, string) {
+	if !h.topics.allow(c.Transport+"|"+c.GroupID, h.now()) {
+		return "", "(No new thread: too many started this hour.)"
+	}
+	t, err := h.Comms.TopicCreate(c.Transport, c.GroupID, name)
+	if err == nil && t != nil && t.ID != "" {
+		return t.ID, ""
+	}
+	h.logf("group %s/%s: thread %q not started: %v", c.Transport, c.GroupID, name, err)
+	msg := ""
+	if err != nil {
+		msg = strings.ToLower(err.Error())
+	}
+	switch {
+	case strings.Contains(msg, "do not have threads"):
+		return "", "(WhatsApp groups have no threads, so I answered here.)"
+	case strings.Contains(msg, "topics are off"):
+		return "", "(I could not start a thread: topics are off in this group.)"
+	}
+	return "", "(I could not start a thread, so I answered here.)"
+}
+
+// sendFiles sends validated files to the calling group, quoting replyTo and
+// in thread when set. A failure is logged and the rest still go.
+func (h *Handler) sendFiles(c Call, files []string, thread, replyTo string) {
+	for _, f := range files {
+		if _, err := h.Comms.SendFileWith(c.Transport, c.GroupID, f, "", client.SendOptions{ReplyTo: replyTo, Thread: thread}); err != nil {
+			h.logf("group %s/%s: sending %s failed: %v", c.Transport, c.GroupID, f, err)
+		}
+	}
+}
+
+// reply sends text to the calling group, quoting the calling message, in
+// the thread the call came from. The target comes from the call, never from
+// model output.
 func (h *Handler) reply(c Call, text string) {
-	if _, err := h.Comms.SendOpts(c.Transport, c.GroupID, text, c.MsgID, nil); err != nil {
+	if _, err := h.Comms.SendWith(c.Transport, c.GroupID, text, client.SendOptions{ReplyTo: c.MsgID, Thread: c.ThreadID}); err != nil {
 		h.logf("group %s/%s: send failed: %v", c.Transport, c.GroupID, err)
 	}
 }
 
-func (h *Handler) answer(pol store.GroupPolicy, c Call) (string, error) {
+func (h *Handler) answer(pol store.GroupPolicy, c Call, outbox string) (answered, error) {
+	var a answered
 	window, err := h.Comms.GroupRead(c.Transport, c.GroupID, client.GroupReadOpts{Around: c.MsgID, Limit: WindowCount})
 	if err != nil {
 		h.logf("group %s/%s: window read: %v", c.Transport, c.GroupID, err)
@@ -386,16 +477,16 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call) (string, error) {
 	switch pol.Kind {
 	case store.GroupProject:
 		if h.Projects == nil {
-			return "", fmt.Errorf("project groups are not available")
+			return a, fmt.Errorf("project groups are not available")
 		}
 		pc, err := h.Projects.CallContext(pol.ProjectID)
 		if err != nil {
-			return "", err
+			return a, err
 		}
 		if pc.General {
 			d, err := os.MkdirTemp(h.Scratch, "group-call-*")
 			if err != nil {
-				return "", err
+				return a, err
 			}
 			dir, cleanup = d, func() { _ = os.RemoveAll(d) }
 			profile = GeneralProfile
@@ -408,10 +499,12 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call) (string, error) {
 			profile = WithEdits(profile)
 		}
 		kind = projectKind(pc, write)
+		a.ProjectDir = pc.Dir
+		kind += "\n\n" + shareNote(outbox, profile.HasShell())
 	default:
 		d, err := os.MkdirTemp(h.Scratch, "group-call-*")
 		if err != nil {
-			return "", err
+			return a, err
 		}
 		dir, cleanup = d, func() { _ = os.RemoveAll(d) }
 		profile = GeneralProfile
@@ -434,9 +527,14 @@ func (h *Handler) answer(pol store.GroupPolicy, c Call) (string, error) {
 	prompt := BuildPrompt(h.seed(Persona), c, task, lang, window, kind)
 	out, err := h.Run(RunRequest{Persona: Persona, Dir: dir, Prompt: prompt, Profile: profile})
 	if err != nil {
-		return "", err
+		return a, err
 	}
-	return h.capReply(dir, strings.TrimSpace(out)), nil
+	text, d := SplitDirectives(strings.TrimSpace(out))
+	if text == "" && len(d.Attach) > 0 {
+		text = "Here it is."
+	}
+	a.Text, a.Directives = h.capReply(dir, text), d
+	return a, nil
 }
 
 // transcribe turns the call's audio files into transcripts. A failure leaves

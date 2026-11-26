@@ -72,6 +72,9 @@ func Split(s string) ([]string, error) {
 type Args struct {
 	Flags map[string]string
 	Pos   []string
+	// All holds every value of each flag in order, for flags that may be
+	// repeated (Flags keeps the last).
+	All map[string][]string
 }
 
 // Parse separates flags from positional words. switches names the flags that
@@ -81,7 +84,7 @@ func Parse(words []string, switches ...string) (Args, error) {
 	for _, s := range switches {
 		sw[s] = true
 	}
-	a := Args{Flags: map[string]string{}}
+	a := Args{Flags: map[string]string{}, All: map[string][]string{}}
 	for i := 0; i < len(words); i++ {
 		w := words[i]
 		if w == "--" {
@@ -95,6 +98,7 @@ func Parse(words []string, switches ...string) (Args, error) {
 		name := strings.TrimPrefix(w, "--")
 		if k, v, ok := strings.Cut(name, "="); ok {
 			a.Flags[k] = v
+			a.All[k] = append(a.All[k], v)
 			continue
 		}
 		if sw[name] {
@@ -105,6 +109,7 @@ func Parse(words []string, switches ...string) (Args, error) {
 			return a, fmt.Errorf("--%s needs a value", name)
 		}
 		a.Flags[name] = words[i+1]
+		a.All[name] = append(a.All[name], words[i+1])
 		i++
 	}
 	return a, nil

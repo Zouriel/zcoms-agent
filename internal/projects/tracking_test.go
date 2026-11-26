@@ -18,6 +18,44 @@ type setCall struct {
 type fakeOwner struct {
 	groups map[string]client.Group // by name and by native id
 	sets   []setCall
+
+	// say: sends records every send, topics the existing threads, created
+	// the threads made; topicErr fails topic_list and topic_create.
+	sends    []ownerSend
+	topics   []client.Topic
+	created  []string
+	topicErr error
+}
+
+type ownerSend struct {
+	transport, to, text, file, thread string
+}
+
+func (f *fakeOwner) SendWith(transport, to, text string, o client.SendOptions) (client.Response, error) {
+	f.sends = append(f.sends, ownerSend{transport: transport, to: to, text: text, thread: o.Thread})
+	return client.Response{OK: true}, nil
+}
+
+func (f *fakeOwner) SendFileWith(transport, to, path, caption string, o client.SendOptions) (client.Response, error) {
+	f.sends = append(f.sends, ownerSend{transport: transport, to: to, text: caption, file: path, thread: o.Thread})
+	return client.Response{OK: true}, nil
+}
+
+func (f *fakeOwner) TopicList(string, string) ([]client.Topic, error) {
+	if f.topicErr != nil {
+		return nil, f.topicErr
+	}
+	return f.topics, nil
+}
+
+func (f *fakeOwner) TopicCreate(_, _, name string) (*client.Topic, error) {
+	if f.topicErr != nil {
+		return nil, f.topicErr
+	}
+	f.created = append(f.created, name)
+	t := client.Topic{ID: "900", Name: name}
+	f.topics = append(f.topics, t)
+	return &t, nil
 }
 
 func (f *fakeOwner) GroupGet(_, group string) (*client.Group, error) {

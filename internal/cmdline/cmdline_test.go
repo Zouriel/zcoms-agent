@@ -39,3 +39,16 @@ func TestParse(t *testing.T) {
 		t.Fatalf("pos = %v", a.Pos)
 	}
 }
+
+func TestParseRepeatedFlags(t *testing.T) {
+	a, err := Parse([]string{"--file", "/a.png", "--file=/b.png", "--thread", "ui", "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := a.All["file"]; len(got) != 2 || got[0] != "/a.png" || got[1] != "/b.png" {
+		t.Fatalf("All[file] = %v", got)
+	}
+	if a.Flags["file"] != "/b.png" || a.Flags["thread"] != "ui" || len(a.Pos) != 1 {
+		t.Fatalf("args = %+v", a)
+	}
+}

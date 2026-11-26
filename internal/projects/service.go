@@ -26,6 +26,10 @@ type OwnerComms interface {
 	GroupMembers(transport, group string) ([]client.GroupMember, error)
 	GroupSet(transport, group string, listen, follow *bool) (*client.Group, error)
 	SendOpts(transport, to, text, replyTo string, mentions []string) (client.Response, error)
+	SendWith(transport, to, text string, o client.SendOptions) (client.Response, error)
+	SendFileWith(transport, to, path, caption string, o client.SendOptions) (client.Response, error)
+	TopicList(transport, group string) ([]client.Topic, error)
+	TopicCreate(transport, group, name string) (*client.Topic, error)
 	ListContacts() ([]client.Contact, error)
 }
 
@@ -50,6 +54,10 @@ type Service struct {
 	OnFollow func(p store.Project)
 	Log      *log.Logger
 	Now      func() time.Time
+	// OwnerChat is the owner's private Telegram address (settings main_user),
+	// where `project say --file` sends files when the group cannot take a
+	// thread. Empty disables that fallback.
+	OwnerChat func() string
 
 	mu sync.Mutex // one project write path at a time
 	// dirMu keeps readers that open a history database outside mu (the
@@ -140,7 +148,7 @@ func (s *Service) Command(words []string) (string, error) {
 	case "sync":
 		return s.sync(p)
 	case "say":
-		return s.say(p, strings.Join(a.Pos, " "))
+		return s.say(p, SayOpts{Text: strings.Join(a.Pos, " "), Thread: a.Flags["thread"], Files: a.All["file"]})
 	default:
 		return "", fmt.Errorf("unknown project command %q", sub)
 	}
@@ -578,17 +586,6 @@ func (s *Service) sync(p store.Project) (string, error) {
 	}
 	files = append(files, filepath.Join(p.Path, DotfileName))
 	return "Synced.\n  " + strings.Join(files, "\n  "), nil
-}
-
-func (s *Service) say(p store.Project, text string) (string, error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return "", errors.New("usage: project say <text>")
-	}
-	if _, err := s.Owner.SendOpts(p.Transport, p.NativeID, text, "", nil); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("Sent to %q.", p.GroupName), nil
 }
 
 func onOff(v string, def bool) (bool, error) {
