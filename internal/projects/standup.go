@@ -165,13 +165,32 @@ func (s *Service) compact(p store.Project, msgs []client.GroupMessage, members [
 	b.WriteString("\nReply EXACTLY in these lines and nothing else:\n")
 	b.WriteString("SUMMARY: <two or three plain sentences about what happened>\n")
 	b.WriteString("TASK: <short title> | <member name or nickname exactly as listed, or none> | <message id it came from>\n")
-	b.WriteString("(one TASK line per concrete task someone agreed to or was asked to do; no TASK lines if there are none)\n")
+	b.WriteString("(one TASK line per concrete task someone agreed to or was asked to do; no TASK lines if there are none; never a TASK from the assistant's own messages)\n")
 	out, err := s.runAs(UnderstandPersona, p.Path, b.String())
 	if err != nil {
 		s.logf("standup %s: compact pass: %v", p.Path, err)
 		return fmt.Sprintf("%d messages in the group.", len(msgs)), nil
 	}
-	return ParseCompact(out)
+	summary, tasks := ParseCompact(out)
+	return summary, dropOwnTasks(tasks, msgs)
+}
+
+// dropOwnTasks removes tasks whose source is one of the assistant's own
+// messages: its progress updates and test prompts are not work someone took on.
+func dropOwnTasks(tasks []NewTask, msgs []client.GroupMessage) []NewTask {
+	own := map[string]bool{}
+	for _, m := range msgs {
+		if m.Outgoing {
+			own[m.ID] = true
+		}
+	}
+	kept := tasks[:0]
+	for _, t := range tasks {
+		if !own[t.Source] {
+			kept = append(kept, t)
+		}
+	}
+	return kept
 }
 
 // ParseCompact reads the SUMMARY:/TASK: lines of the compact pass.
