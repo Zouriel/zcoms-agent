@@ -33,7 +33,7 @@ func TransportLabel(t string) string {
 // no ids, so the block cannot be used to repoint the binding. It tells coding
 // agents to keep the main chat for milestones and to put screenshots, files
 // and step-by-step progress in a thread.
-func BlockText(transport, group string) string {
+func BlockText(transport, group, updates string) string {
 	lines := []string{
 		blockBegin,
 		"## zcoms project group",
@@ -52,11 +52,11 @@ func BlockText(transport, group string) string {
 		)
 	} else {
 		lines = append(lines,
-			"Screenshots, files and step-by-step progress go to a thread, not the main chat:",
-			"zc project say --thread \"<short topic for the work>\" --file <path> \"<caption>\"",
+			fmt.Sprintf("Screenshots, files and step-by-step progress go to the thread %q, never the main chat:", updates),
+			fmt.Sprintf("zc project say --thread %q --file <path> \"<caption>\"", updates),
 			"(--file is optional and may repeat; photos are sent as photos, 20 MB each).",
-			"Reuse the same thread name for the same piece of work; the command creates the",
-			"thread if it does not exist.",
+			"Files sent without --thread go to that thread automatically. Do not create other",
+			"threads: a --thread name that does not exist is posted to that thread instead.",
 			"Post in the main chat (zc project say \"<text>\" without --thread) only for important",
 			"milestones: done, blocked, or a decision needed.",
 			"When you finish UI work, take a screenshot of the running app (for example",
@@ -155,7 +155,7 @@ func gitIgnored(path string) bool {
 // and returns the files it changed. When there are none and create is set, it
 // writes AGENTS.md at the folder root holding only the block.
 func WriteBlocks(folder, transport, group string, create bool) ([]string, error) {
-	block := BlockText(transport, group)
+	block := BlockText(transport, group, UpdatesThreadFor(folder))
 	files := FindInstructionFiles(folder)
 	if len(files) == 0 && create {
 		files = []string{filepath.Join(folder, "AGENTS.md")}

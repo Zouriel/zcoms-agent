@@ -42,11 +42,16 @@ func (s *Service) say(p store.Project, o SayOpts) (string, error) {
 			return "", err
 		}
 	}
+	// Files never go to the main chat: without a thread they go to the
+	// project's updates thread.
+	if o.Thread == "" && len(o.Files) > 0 && p.Transport != "whatsapp" {
+		o.Thread = UpdatesThreadFor(p.Path)
+	}
 	thread, threadErr := "", error(nil)
-	label := ""
+	label, note := "", ""
 	if o.Thread != "" {
 		var t *client.Topic
-		t, threadErr = s.topicFor(p, o.Thread)
+		t, note, threadErr = s.topicFor(p, o.Thread)
 		if threadErr == nil {
 			thread, label = t.ID, t.Name
 		}
@@ -70,29 +75,45 @@ func (s *Service) say(p store.Project, o SayOpts) (string, error) {
 		if _, err := s.Owner.SendWith(p.Transport, p.NativeID, o.Text, opts); err != nil {
 			return "", err
 		}
-		return "Sent to " + where + ".", nil
+		return "Sent to " + where + "." + note, nil
 	}
 	if err := s.sendFiles(p.Transport, p.NativeID, o.Files, o.Text, opts); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Sent %d file(s) to %s.", len(o.Files), where), nil
+	return fmt.Sprintf("Sent %d file(s) to %s.%s", len(o.Files), where, note), nil
 }
 
-// topicFor finds the group's thread named (or numbered) name, creating it
-// when there is none.
-func (s *Service) topicFor(p store.Project, name string) (*client.Topic, error) {
+// topicFor finds the group's thread named (or numbered) name. Coding
+// sessions may not open new threads: only the project's updates thread is
+// ever created; any other unknown name is posted to the updates thread, with
+// a note saying so.
+func (s *Service) topicFor(p store.Project, name string) (*client.Topic, string, error) {
+	updates := UpdatesThreadFor(p.Path)
 	ts, err := s.Owner.TopicList(p.Transport, p.NativeID)
-	if err == nil {
+	if err != nil && !topicsOffYet(err) {
+		return nil, "", err
+	}
+	find := func(n string) *client.Topic {
 		for _, t := range ts {
-			if strings.EqualFold(t.Name, name) || t.ID == name {
+			if strings.EqualFold(strings.TrimSpace(t.Name), strings.TrimSpace(n)) || t.ID == n {
 				t := t
-				return &t, nil
+				return &t
 			}
 		}
-	} else if !topicsOffYet(err) {
-		return nil, err
+		return nil
 	}
-	return s.Owner.TopicCreate(p.Transport, p.NativeID, name)
+	if t := find(name); t != nil {
+		return t, "", nil
+	}
+	note := ""
+	if !strings.EqualFold(strings.TrimSpace(name), updates) {
+		note = fmt.Sprintf(" (no thread %q, so it went to %q; coding sessions do not open new threads)", name, updates)
+		if t := find(updates); t != nil {
+			return t, note, nil
+		}
+	}
+	t, err := s.Owner.TopicCreate(p.Transport, p.NativeID, updates)
+	return t, note, err
 }
 
 // topicsOffYet reports whether a topic_list error only means the group is

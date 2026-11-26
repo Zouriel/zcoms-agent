@@ -37,6 +37,8 @@ func sayWords(t *testing.T, line string) []string {
 	return w[1:] // drop "project"
 }
 
+// Coding sessions never open new threads: an unknown name lands in the
+// project's updates thread, which is created once and then reused.
 func TestSayFilesInANewThread(t *testing.T) {
 	s, fo, dest := boundProject(t)
 	a := writeTemp(t, dest, "a.png")
@@ -45,7 +47,7 @@ func TestSayFilesInANewThread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fo.created) != 1 || fo.created[0] != "login bug" {
+	if len(fo.created) != 1 || fo.created[0] != DefaultUpdatesThread {
 		t.Fatalf("created = %v", fo.created)
 	}
 	if len(fo.sends) != 2 {
@@ -57,11 +59,11 @@ func TestSayFilesInANewThread(t *testing.T) {
 	if s1 := fo.sends[1]; s1.file != b || s1.text != "" || s1.thread != "900" {
 		t.Fatalf("second = %+v", s1)
 	}
-	if !strings.Contains(out, "login bug") {
+	if !strings.Contains(out, DefaultUpdatesThread) || !strings.Contains(out, "login bug") {
 		t.Fatalf("out = %q", out)
 	}
 
-	// The same name again reuses the thread (case-insensitive).
+	// Another unknown name reuses the updates thread, creating nothing.
 	fo.sends = nil
 	if _, err := s.Command(sayWords(t, `project say --path `+dest+` --thread "Login Bug" step two`)); err != nil {
 		t.Fatal(err)
@@ -140,10 +142,10 @@ func TestSyncRewritesOldBlock(t *testing.T) {
 	if !strings.Contains(got, "--thread") || !strings.Contains(got, "only for important") || strings.Count(got, "zcoms:begin") != 1 || !strings.HasPrefix(got, "# Notes") {
 		t.Fatalf("block not rewritten:\n%s", got)
 	}
-	if strings.ContainsAny(BlockText("telegram", "A")+BlockText("whatsapp", "A"), "–—") {
+	if strings.ContainsAny(BlockText("telegram", "A", DefaultUpdatesThread)+BlockText("whatsapp", "A", DefaultUpdatesThread), "–—") {
 		t.Fatal("dash in block text")
 	}
-	if wa := BlockText("whatsapp", "A"); strings.Contains(wa, "--thread") || !strings.Contains(wa, "only when asked") {
+	if wa := BlockText("whatsapp", "A", DefaultUpdatesThread); strings.Contains(wa, "--thread") || !strings.Contains(wa, "only when asked") {
 		t.Fatalf("whatsapp block:\n%s", wa)
 	}
 }
@@ -156,3 +158,22 @@ func writeTemp(t *testing.T, dir, name string) string {
 }
 
 var _ OwnerComms = (*client.Client)(nil)
+
+func TestSayFilesWithoutThreadGoToUpdatesThread(t *testing.T) {
+	s, fo, dest := boundProject(t)
+	dot, _, _ := ReadDotfile(dest)
+	dot.UpdatesThread = "Screenshot & progress update"
+	if err := WriteDotfile(dest, dot); err != nil {
+		t.Fatal(err)
+	}
+	a := writeTemp(t, dest, "a.png")
+	if _, err := s.Command(sayWords(t, `project say --path `+dest+` --file `+a+` "shot"`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(fo.created) != 1 || fo.created[0] != "Screenshot & progress update" || fo.sends[0].thread == "" {
+		t.Fatalf("created=%v sends=%+v", fo.created, fo.sends)
+	}
+	if !strings.Contains(BlockText("telegram", "A", UpdatesThreadFor(dest)), `"Screenshot & progress update"`) {
+		t.Fatal("block does not name the updates thread")
+	}
+}

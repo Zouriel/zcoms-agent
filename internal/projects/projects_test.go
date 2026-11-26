@@ -139,7 +139,7 @@ func TestParseCompact(t *testing.T) {
 }
 
 func TestBlockIdempotent(t *testing.T) {
-	block := BlockText("telegram", "Acme build")
+	block := BlockText("telegram", "Acme build", DefaultUpdatesThread)
 	for _, start := range []string{"", "# Rules\n\nBe nice.\n", "# Rules"} {
 		once := UpsertBlock(start, block)
 		twice := UpsertBlock(once, block)
@@ -155,7 +155,7 @@ func TestBlockIdempotent(t *testing.T) {
 	}
 	// A renamed group replaces only between the markers.
 	doc := "intro\n\n" + UpsertBlock("", block) + "\noutro\n"
-	next := UpsertBlock(doc, BlockText("whatsapp", "New name"))
+	next := UpsertBlock(doc, BlockText("whatsapp", "New name", DefaultUpdatesThread))
 	if !strings.Contains(next, "intro") || !strings.Contains(next, "outro") || strings.Contains(next, "Acme build") || !strings.Contains(next, "WhatsApp group \"New name\"") {
 		t.Fatalf("replace went wrong:\n%s", next)
 	}

@@ -108,7 +108,7 @@ func TestDirMovesHistoryWithWAL(t *testing.T) {
 func TestDirMovesBlockOutOfOldFolder(t *testing.T) {
 	s, _, p, _ := trackedAcme(t)
 	agents := filepath.Join(p.Path, "AGENTS.md")
-	if err := os.WriteFile(agents, []byte("# Old\n\n"+BlockText("telegram", "Acme")+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(agents, []byte("# Old\n\n"+BlockText("telegram", "Acme", DefaultUpdatesThread)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	dest := t.TempDir()

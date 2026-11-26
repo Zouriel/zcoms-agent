@@ -25,9 +25,23 @@ const DotfileName = ".zcoms"
 // Dotfile is the .zcoms content. It holds names only; platform ids stay in
 // agent.db and the history database. Group is display only.
 type Dotfile struct {
-	Group       string      `toml:"group"`
-	FollowTasks bool        `toml:"follow_tasks"`
-	Members     []DotMember `toml:"member"`
+	Group       string `toml:"group"`
+	FollowTasks bool   `toml:"follow_tasks"`
+	// UpdatesThread is the one Telegram topic coding sessions post screenshots
+	// and progress in ("" means DefaultUpdatesThread).
+	UpdatesThread string      `toml:"updates_thread,omitempty"`
+	Members       []DotMember `toml:"member"`
+}
+
+// DefaultUpdatesThread names the updates topic when .zcoms sets none.
+const DefaultUpdatesThread = "Progress updates"
+
+// UpdatesThreadFor returns the project's updates topic name from .zcoms.
+func UpdatesThreadFor(folder string) string {
+	if d, ok, err := ReadDotfile(folder); err == nil && ok && strings.TrimSpace(d.UpdatesThread) != "" {
+		return strings.TrimSpace(d.UpdatesThread)
+	}
+	return DefaultUpdatesThread
 }
 
 // DotMember is one [[member]] entry: a display name and the nicknames people
