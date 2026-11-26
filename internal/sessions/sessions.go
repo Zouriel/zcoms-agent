@@ -1,6 +1,6 @@
 // Package sessions is the agent's session manager. A Session is one agent run
 // anchored to a workspace, started fresh or resumed from a prior Claude Code /
-// Codex run. Existence is enumerated LIVE from the backend at query time — the
+// Codex / agy run. Existence is enumerated LIVE from the backend at query time — the
 // store never caches which sessions exist (that was the staleness bug). The
 // store row only decorates a live session with a label / last-resumed stamp.
 package sessions

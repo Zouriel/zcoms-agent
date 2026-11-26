@@ -192,7 +192,7 @@ func now() string { return time.Now().UTC().Format(time.RFC3339) }
 // as a set here so the store validates without importing the runner package.
 var validRoles = map[string]bool{"read": true, "confirm": true, "edit": true, "full": true}
 
-var validBackends = map[string]bool{"claude": true, "codex": true}
+var validBackends = map[string]bool{"claude": true, "codex": true, "agy": true}
 
 func validateRole(r string) error {
 	if r == "" {
@@ -206,7 +206,7 @@ func validateRole(r string) error {
 
 func validateBackend(b string) error {
 	if !validBackends[strings.ToLower(b)] {
-		return fmt.Errorf("invalid backend %q (want claude|codex)", b)
+		return fmt.Errorf("invalid backend %q (want claude|codex|agy)", b)
 	}
 	return nil
 }

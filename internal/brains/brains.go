@@ -4,7 +4,8 @@
 //
 // Nothing here is authoritative about what Anthropic or OpenAI publish: each
 // list is read from the installed CLI itself (codex caches its model catalogue
-// on disk; claude documents its accepted aliases in `--model` help), so a CLI
+// on disk; claude documents its accepted aliases in `--model` help; agy prints
+// its catalogue with `agy models`), so a CLI
 // upgrade updates the console with no zcoms release. Every list is advisory —
 // the owner can always type a model the discovery missed, and the CLI has the
 // final say at run time.
@@ -46,7 +47,7 @@ type Model struct {
 // found nothing, which is not an error: the owner can still type a model by
 // hand, and Source says where the (possibly empty) list came from.
 type Backend struct {
-	Name      string  `json:"name"` // "claude" | "codex"
+	Name      string  `json:"name"` // "claude" | "codex" | "agy"
 	Installed bool    `json:"installed"`
 	Models    []Model `json:"models"`
 	Source    string  `json:"source"`
@@ -82,7 +83,7 @@ func Invalidate() {
 
 func discover() []Backend {
 	out := []Backend{}
-	for _, b := range []runner.Backend{runner.BackendClaude, runner.BackendCodex} {
+	for _, b := range runner.Backends() {
 		entry := Backend{Name: string(b), Installed: runner.AgentAvailable(b)}
 		if !entry.Installed {
 			entry.Source = "not installed"
@@ -92,6 +93,8 @@ func discover() []Backend {
 		switch b {
 		case runner.BackendCodex:
 			entry.Models, entry.Source = codexModels()
+		case runner.BackendAgy:
+			entry.Models, entry.Source = agyModels()
 		default:
 			entry.Models, entry.Source = claudeModels()
 		}
@@ -171,6 +174,45 @@ func codexHome() string {
 		return ".codex"
 	}
 	return filepath.Join(home, ".codex")
+}
+
+// --- agy --------------------------------------------------------------------
+
+// agyModels asks the installed agy CLI for its model catalogue. `agy models`
+// prints one "id<TAB>label" line per model the signed-in account can select
+// (the effort level is part of the id), so it is the live list.
+func agyModels() ([]Model, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), helpTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, runner.AgentBin("agy"), "models").Output()
+	if err != nil {
+		return nil, "agy models unavailable"
+	}
+	models := parseAgyModels(string(out))
+	if len(models) == 0 {
+		return nil, "agy models listed nothing"
+	}
+	return models, "agy models"
+}
+
+// parseAgyModels reads `agy models` output, keeping agy's own order and
+// skipping anything that is not an "id<TAB>label" line (progress notes).
+func parseAgyModels(out string) []Model {
+	var models []Model
+	seen := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		id, label, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		id, label = strings.TrimSpace(id), strings.TrimSpace(label)
+		if !ok || id == "" || strings.ContainsAny(id, " ") || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if label == "" {
+			label = id
+		}
+		models = append(models, Model{ID: id, Display: label})
+	}
+	return models
 }
 
 // --- claude -----------------------------------------------------------------

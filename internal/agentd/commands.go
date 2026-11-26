@@ -339,7 +339,7 @@ func (a *Agent) personaCmd(args []string) (string, error) {
 		}
 		return strings.TrimRight(b.String(), "\n"), nil
 	case "set", "edit":
-		// persona set <key> backend <claude|codex> | model <m> | seed <text…>
+		// persona set <key> backend <claude|codex|agy> | model <m> | seed <text…>
 		// An omitted value clears the field, which is how model goes back to the
 		// CLI's own default; backend has no empty form.
 		if len(args) < 3 {
@@ -347,7 +347,7 @@ func (a *Agent) personaCmd(args []string) (string, error) {
 		}
 		key, field, val := args[1], args[2], strings.Join(args[3:], " ")
 		if field == "backend" && strings.TrimSpace(val) == "" {
-			return "", fmt.Errorf("usage: persona set <key> backend claude|codex")
+			return "", fmt.Errorf("usage: persona set <key> backend claude|codex|agy")
 		}
 		p, ok, err := a.Store.GetPersona(key)
 		if err != nil {
@@ -358,6 +358,12 @@ func (a *Agent) personaCmd(args []string) (string, error) {
 		}
 		switch field {
 		case "backend":
+			// A model belongs to one CLI, so switching backend also moves the
+			// model to the new backend's default for this persona (or the CLI's
+			// own default).
+			if !strings.EqualFold(strings.TrimSpace(val), p.Backend) {
+				p.Model = personas.DefaultModel(runner.Backend(strings.ToLower(strings.TrimSpace(val))), key)
+			}
 			p.Backend = val
 		case "model":
 			p.Model = val

@@ -120,3 +120,14 @@ func TestLiveDiscovery(t *testing.T) {
 		}
 	}
 }
+
+func TestParseAgyModels(t *testing.T) {
+	out := "Fetching available models...\ngemini-4-neon-high\tGemini 4 Neon (High)\ngemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n\ngemini-4-neon-high\tdup\nbare-id\n"
+	got := parseAgyModels(out)
+	if len(got) != 2 || got[0].ID != "gemini-4-neon-high" || got[0].Display != "Gemini 4 Neon (High)" || got[1].ID != "gemini-3.8-flash-low" {
+		t.Fatalf("models = %+v", got)
+	}
+	if parseAgyModels("") != nil {
+		t.Fatal("empty output gave models")
+	}
+}

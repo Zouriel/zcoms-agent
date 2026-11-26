@@ -34,6 +34,7 @@ const (
 
 	BackendClaude = runner.BackendClaude
 	BackendCodex  = runner.BackendCodex
+	BackendAgy    = runner.BackendAgy
 )
 
 var (

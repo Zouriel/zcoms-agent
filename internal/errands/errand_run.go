@@ -360,7 +360,7 @@ func (d *Comp) runInterviewTurn(e *Errand, prompt string) (handoff bool) {
 	brain := d.agentBrain(personas.ErrandInterviewer)
 	if brain.Backend == "" {
 		d.logErrand(e, errandLogInterviewer, "failed", "no agent CLI configured")
-		d.send(e.OwnerChat, fmt.Sprintf("⚠️ Errand %s can't run — no agent CLI (claude/codex) is installed.", e.ID))
+		d.send(e.OwnerChat, fmt.Sprintf("⚠️ Errand %s can't run: no agent CLI (claude/codex/agy) is installed.", e.ID))
 		d.setErrandStatus(e, ErrandFailed)
 		return false
 	}
@@ -522,7 +522,7 @@ func (d *Comp) runGuardTurn(e *Errand, prompt string) guardVerdict {
 	brain := d.agentBrain(personas.Guard)
 	if brain.Backend == "" {
 		d.logErrand(e, errandLogGuard, "failed", "no agent CLI configured")
-		d.send(e.OwnerChat, fmt.Sprintf("⚠️ Errand %s can't run the guard — no agent CLI (claude/codex) is installed.", e.ID))
+		d.send(e.OwnerChat, fmt.Sprintf("⚠️ Errand %s can't run the guard: no agent CLI (claude/codex/agy) is installed.", e.ID))
 		d.setErrandStatus(e, ErrandFailed)
 		return guardFlag
 	}

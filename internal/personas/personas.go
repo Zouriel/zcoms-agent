@@ -264,12 +264,13 @@ func BrainWith(s *store.Store, key string, override runner.Backend) runner.Brain
 	}
 	got := cfg.For(key, override)
 	if got == "" {
-		return runner.Brain{} // no claude and no codex installed
+		return runner.Brain{} // no agent CLI installed at all
 	}
 	// A model name belongs to one CLI (opus is not a codex model), so keep it only
-	// when the run actually landed on the backend the persona asked for.
+	// when the run actually landed on the backend the persona asked for; a
+	// fallback runs on that backend's default for the persona instead.
 	if got != want {
-		model = ""
+		model = DefaultModel(got, key)
 	}
 	return runner.Brain{Backend: got, Model: model}
 }
@@ -295,17 +296,32 @@ func Default(key string) (display, seed string, ok bool) {
 	return d.display, d.seed, ok
 }
 
-// defaultModel is the seed-time model for personas that need one (claude
-// names, since personas seed on claude). Group work runs in two passes: the
-// understand pass (group_understand) on the top model, because members may
-// write in Dhivehi or mixed languages, and the work pass (group,
-// project_standup) on a lower model. Only seed defaults: both are editable
-// from the console. On another backend the model is dropped and the CLI's
-// own default is used for both passes.
-var defaultModel = map[string]string{
-	GroupUnderstand: "claude-fable-5-2",
-	Group:           "sonnet",
-	ProjectStandup:  "sonnet",
+// defaultModels are the per-backend models for personas that need one. Group
+// work runs in two passes: the understand pass (group_understand) on the
+// backend's top model, because members may write in Dhivehi or mixed
+// languages, and the work pass (group, project_standup) on a lower model.
+// Personas seed on claude with the claude entries; the others are used when a
+// persona is switched to that backend or a run falls back to it. All are only
+// defaults: every model stays editable from the console. On agy the effort is
+// part of the model id (`agy models` lists them); Hydrogen is the model agy's
+// own Orchestrator hands execution to, so it is the work model.
+var defaultModels = map[runner.Backend]map[string]string{
+	runner.BackendClaude: {
+		GroupUnderstand: "claude-fable-5-2",
+		Group:           "sonnet",
+		ProjectStandup:  "sonnet",
+	},
+	runner.BackendAgy: {
+		GroupUnderstand: "gemini-4-neon-high",
+		Group:           "gemini-4-hydrogen-medium",
+		ProjectStandup:  "gemini-4-hydrogen-medium",
+	},
+}
+
+// DefaultModel returns the default model for persona key on backend b, or ""
+// for the CLI's own default.
+func DefaultModel(b runner.Backend, key string) string {
+	return defaultModels[b][key]
 }
 
 // SeedDefaults inserts any missing default persona on first run (owner action).
@@ -321,7 +337,7 @@ func SeedDefaults(s *store.Store) error {
 			Key:         key,
 			DisplayName: d.display,
 			Backend:     "claude",
-			Model:       defaultModel[key],
+			Model:       DefaultModel(runner.BackendClaude, key),
 			SeedPrompt:  d.seed,
 		}); err != nil {
 			return fmt.Errorf("seed persona %s: %w", key, err)

@@ -13,8 +13,11 @@ import (
 // ListSessionsFor lists past sessions for a project directory using the given
 // backend's on-disk session store.
 func ListSessionsFor(backend Backend, absPath string, limit int) ([]Session, error) {
-	if backend.normalize() == BackendCodex {
+	switch backend.normalize() {
+	case BackendCodex:
 		return ListCodexSessions(absPath, limit)
+	case BackendAgy:
+		return ListAgySessions(absPath, limit)
 	}
 	return ListSessions(absPath, limit)
 }

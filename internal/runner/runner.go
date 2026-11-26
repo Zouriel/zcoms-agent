@@ -48,11 +48,17 @@ type Backend string
 const (
 	BackendClaude Backend = "claude"
 	BackendCodex  Backend = "codex"
+	BackendAgy    Backend = "agy" // Google Antigravity CLI
 )
 
+// normalize maps a stored backend name onto a known CLI, claude for anything
+// unrecognised.
 func (b Backend) normalize() Backend {
-	if b == BackendCodex {
+	switch Backend(strings.ToLower(strings.TrimSpace(string(b)))) {
+	case BackendCodex:
 		return BackendCodex
+	case BackendAgy:
+		return BackendAgy
 	}
 	return BackendClaude
 }
@@ -75,6 +81,7 @@ func agentBin(name string) string {
 var (
 	claudeBin = agentBin("claude")
 	codexBin  = agentBin("codex")
+	agyBin    = agentBin("agy")
 )
 
 // AgentBin resolves a CLI's absolute path for callers that need to run it
@@ -101,8 +108,11 @@ func (b Brain) String() string {
 // the (otherwise read-only) sandboxed agent gets dir as a writable scratch space
 // — still no network — so it can produce files to SENDFILE.
 func RunAgent(brain Brain, dir, prompt, resumeID string, role Role, stagingWritable bool) (RunResult, error) {
-	if brain.Backend.normalize() == BackendCodex {
+	switch brain.Backend.normalize() {
+	case BackendCodex:
 		return RunCodex(brain.Model, dir, prompt, resumeID, role, stagingWritable)
+	case BackendAgy:
+		return RunAgy(brain.Model, dir, prompt, resumeID, role, stagingWritable)
 	}
 	return RunClaude(brain.Model, dir, prompt, resumeID, role, stagingWritable)
 }

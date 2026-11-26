@@ -66,13 +66,38 @@ func (p ToolProfile) onlyShellAndReads() bool {
 
 // ErrProfileUnsupported is returned when a backend cannot honour a tool
 // profile exactly. Codex always has a shell, so it can only run a profile that
-// grants one; callers fall back to claude or to a canned reply.
+// grants one; agy always has web search and only web access can be pinned, so
+// it can only run a web-only profile. Callers fall back to claude or to a
+// canned reply.
 var ErrProfileUnsupported = errors.New("backend cannot run this tool profile")
 
 // Supports reports whether brain's backend can run profile p exactly.
 func Supports(b Backend, p ToolProfile) bool {
-	if b.normalize() == BackendCodex {
+	switch b.normalize() {
+	case BackendCodex:
 		return p.onlyShellAndReads()
+	case BackendAgy:
+		return p.onlyWeb()
+	}
+	return true
+}
+
+// onlyWeb reports whether the profile is web access and nothing else, the one
+// shape agy can hold to. agy's permission rules can deny its shell, file and
+// MCP tools reliably (sub-agents and python workflows included), but cannot
+// remove web search, so a profile with no web grant (the understand pass, a
+// standup) would gain one. Its read_file rules are path prefixes without globs,
+// so a project profile's secret-file denies cannot be expressed, and its
+// terminal sandbox lets a command escape when permissions are skipped, so a
+// shell cannot be held read-only either. Those profiles stay on claude.
+func (p ToolProfile) onlyWeb() bool {
+	if len(p.Tools) == 0 || len(p.Deny) > 0 {
+		return false
+	}
+	for _, t := range p.Tools {
+		if t != "WebSearch" && t != "WebFetch" {
+			return false
+		}
 	}
 	return true
 }
@@ -124,14 +149,23 @@ func containsStr(list []string, s string) bool {
 
 // RunRestricted runs one fresh, never-resumed turn in dir with exactly the
 // tools in p. Claude honours any profile; Codex only a shell-and-read profile
-// (read-only sandbox, so no writes and no network) and otherwise returns
-// ErrProfileUnsupported.
+// (read-only sandbox, so no writes and no network); agy only a web-only
+// profile. Otherwise it returns ErrProfileUnsupported.
 func RunRestricted(brain Brain, dir, prompt string, p ToolProfile) (RunResult, error) {
-	if brain.Backend.normalize() == BackendCodex {
+	switch brain.Backend.normalize() {
+	case BackendCodex:
 		if !p.onlyShellAndReads() {
 			return RunResult{}, ErrProfileUnsupported
 		}
 		return runCodexReadOnly(brain.Model, dir, prompt)
+	case BackendAgy:
+		if !p.onlyWeb() {
+			return RunResult{}, ErrProfileUnsupported
+		}
+		return runRestrictedCmd(agyBin, dir, agyWebOnlyArgs(brain.Model, prompt), func(out string) (RunResult, error) {
+			res, err := parseAgyJSON(out, "")
+			return RunResult{Text: res.Text}, err
+		})
 	}
 	args := claudeRestrictedArgs(brain.Model, prompt, p)
 	return runRestrictedCmd(claudeBin, dir, args, parseClaudeJSON)
@@ -158,6 +192,22 @@ func runCodexReadOnly(model, dir, prompt string) (RunResult, error) {
 		}
 		return RunResult{Text: strings.TrimSpace(string(b))}, nil
 	})
+}
+
+// agyWebOnlyArgs builds the agy flags for a web-only restricted run: every
+// shell, file, MCP and browser-action call is denied by rule (search_web cannot
+// be), nothing is auto-approved, and slash commands are off because the prompt
+// carries third-party text.
+func agyWebOnlyArgs(model, prompt string) []string {
+	args := []string{"--output-format", "json", "--disable-slash-commands",
+		"--settings", agySettingsArg(agyPermissions{
+			Deny: []string{agyAllCommands, agyAllReads, agyAllWrites, agyAllMCP, agyAllBrowser},
+		}),
+	}
+	if m := strings.TrimSpace(model); m != "" {
+		args = append(args, "--model", m)
+	}
+	return append(args, "--print="+prompt)
 }
 
 func runRestrictedCmd(bin, dir string, args []string, parse func(string) (RunResult, error)) (RunResult, error) {

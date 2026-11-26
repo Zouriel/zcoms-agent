@@ -3,7 +3,7 @@ package store
 import "fmt"
 
 // Session decorates a backend session anchored to a workspace. Existence is
-// enumerated LIVE from the backend (claude/codex) — this table only adds a label
+// enumerated LIVE from the backend (claude/codex/agy) — this table only adds a label
 // and a last-resumed stamp. There is no Create/Delete API: the store never
 // claims to know which sessions exist.
 type Session struct {

@@ -29,7 +29,8 @@ var errNoBackend = errors.New("no agent CLI can run this turn")
 
 // runRestricted runs one tool-restricted, never-resumed turn on a persona's
 // brain. A backend that cannot honour the tool profile exactly (codex always
-// has a shell) falls back to claude; with neither, the caller gets an error
+// has a shell, agy always has web search and can only be pinned to web
+// access) falls back to claude; with neither, the caller gets an error
 // and sends its canned reply.
 func (a *Agent) runRestricted(req groups.RunRequest) (string, error) {
 	brain := personas.Brain(a.Store, req.Persona)
@@ -40,7 +41,7 @@ func (a *Agent) runRestricted(req groups.RunRequest) (string, error) {
 		if !runner.AgentAvailable(runner.BackendClaude) {
 			return "", fmt.Errorf("%w: %s cannot run without a shell and claude is not installed", errNoBackend, brain.Backend)
 		}
-		brain = runner.Brain{Backend: runner.BackendClaude}
+		brain = runner.Brain{Backend: runner.BackendClaude, Model: personas.DefaultModel(runner.BackendClaude, req.Persona)}
 	}
 	res, err := runner.RunRestricted(brain, req.Dir, req.Prompt, req.Profile)
 	return res.Text, err

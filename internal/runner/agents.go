@@ -25,33 +25,32 @@ const agentsFile = "agents.json"
 // service gets a minimal PATH without ~/.local/bin: a PATH-only probe reported
 // claude missing and silently rerouted every persona to codex.
 func AgentAvailable(b Backend) bool {
-	name := string(BackendClaude)
-	if b.normalize() == BackendCodex {
-		name = string(BackendCodex)
-	}
-	_, err := exec.LookPath(agentBin(name))
+	_, err := exec.LookPath(agentBin(string(b.normalize())))
 	return err == nil
 }
 
-// AvailableAgents returns the installed backends, claude first.
+// Backends lists every supported agent CLI in preference order: claude, then
+// codex, then agy.
+func Backends() []Backend { return []Backend{BackendClaude, BackendCodex, BackendAgy} }
+
+// AvailableAgents returns the installed backends, in Backends order.
 func AvailableAgents() []Backend {
 	var out []Backend
-	if AgentAvailable(BackendClaude) {
-		out = append(out, BackendClaude)
-	}
-	if AgentAvailable(BackendCodex) {
-		out = append(out, BackendCodex)
+	for _, b := range Backends() {
+		if AgentAvailable(b) {
+			out = append(out, b)
+		}
 	}
 	return out
 }
 
-// DefaultAgent prefers claude, then codex, else "" (agent mode unavailable).
+// DefaultAgent returns the first installed backend in Backends order, else ""
+// (agent mode unavailable).
 func DefaultAgent() Backend {
-	if AgentAvailable(BackendClaude) {
-		return BackendClaude
-	}
-	if AgentAvailable(BackendCodex) {
-		return BackendCodex
+	for _, b := range Backends() {
+		if AgentAvailable(b) {
+			return b
+		}
 	}
 	return ""
 }
@@ -73,7 +72,7 @@ func (c AgentConfig) For(task string, override Backend) Backend {
 	if c.Default != "" {
 		candidates = append(candidates, c.Default)
 	}
-	candidates = append(candidates, BackendClaude, BackendCodex)
+	candidates = append(candidates, Backends()...)
 
 	for _, b := range candidates {
 		if AgentAvailable(b) {

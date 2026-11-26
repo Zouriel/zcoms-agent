@@ -71,3 +71,21 @@ func TestEveryRuntimePersonaHasARow(t *testing.T) {
 		}
 	}
 }
+
+// Group personas have a top understand model and a lower work model on claude
+// and agy, and only claude's are seeded.
+func TestGroupDefaultModels(t *testing.T) {
+	for _, b := range []runner.Backend{runner.BackendClaude, runner.BackendAgy} {
+		u, w := DefaultModel(b, GroupUnderstand), DefaultModel(b, Group)
+		if u == "" || w == "" || u == w || DefaultModel(b, ProjectStandup) != w {
+			t.Errorf("%s: understand=%q work=%q", b, u, w)
+		}
+	}
+	if DefaultModel(runner.BackendAgy, Bridge) != "" {
+		t.Error("bridge should run on the CLI default")
+	}
+	s := openTest(t)
+	if p, _, _ := s.GetPersona(GroupUnderstand); p.Backend != "claude" || p.Model != DefaultModel(runner.BackendClaude, GroupUnderstand) {
+		t.Errorf("seeded understand = %s/%s", p.Backend, p.Model)
+	}
+}

@@ -64,7 +64,7 @@ func runGroup(c *client.Client, s runner.Settings, allow runner.Allowlist, seed,
 	}
 
 	if brain.Backend == "" {
-		log.Printf("[triage] %d unread message(s) but no agent (claude/codex) installed; leaving unread", len(msgs))
+		log.Printf("[triage] %d unread message(s) but no agent (claude/codex/agy) installed; leaving unread", len(msgs))
 		return
 	}
 

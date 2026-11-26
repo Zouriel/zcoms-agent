@@ -68,3 +68,25 @@ func TestSupportsCodexOnlyWithShell(t *testing.T) {
 		}
 	}
 }
+
+// agy can deny its shell, file and MCP tools but never web search, and its
+// file rules have no globs: only a web-only profile is held exactly.
+func TestSupportsAgyOnlyWeb(t *testing.T) {
+	cases := []struct {
+		p    ToolProfile
+		want bool
+	}{
+		{ToolProfile{}, false},
+		{ToolProfile{Tools: []string{"WebSearch", "WebFetch"}}, true},
+		{ToolProfile{Tools: []string{"WebSearch"}}, true},
+		{ToolProfile{Tools: []string{"Read", "Grep", "Glob"}}, false},
+		{ToolProfile{Tools: []string{"Read", "Grep", "Glob", "Bash"}, Deny: []string{"Read(**/.env*)"}}, false},
+		{ToolProfile{Tools: []string{"WebSearch", "Bash"}}, false},
+		{ToolProfile{Tools: []string{"WebSearch"}, Deny: []string{"WebFetch(domain:x)"}}, false},
+	}
+	for _, c := range cases {
+		if got := Supports(BackendAgy, c.p); got != c.want {
+			t.Errorf("Supports(agy, %v/%v) = %v, want %v", c.p.Tools, c.p.Deny, got, c.want)
+		}
+	}
+}

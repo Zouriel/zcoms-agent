@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Zouriel/zcoms-agent/internal/personas"
+	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
 )
 
@@ -51,5 +52,34 @@ func TestPersonaSetBackendRejectsEmpty(t *testing.T) {
 	}
 	if p, _, _ := a.Store.GetPersona(personas.Bridge); p.Backend == "" {
 		t.Fatal("backend was cleared despite the error")
+	}
+}
+
+// A model belongs to one CLI, so moving a persona to agy moves its model to
+// agy's default for that persona, and moving it back restores claude's.
+func TestPersonaSetBackendMovesModel(t *testing.T) {
+	a := testAgent(t)
+	if _, err := a.personaCmd([]string{"set", personas.Group, "backend", "agy"}); err != nil {
+		t.Fatalf("set backend agy: %v", err)
+	}
+	p, _, _ := a.Store.GetPersona(personas.Group)
+	if p.Backend != "agy" || p.Model != personas.DefaultModel(runner.BackendAgy, personas.Group) || p.Model == "" {
+		t.Fatalf("after agy: backend=%q model=%q", p.Backend, p.Model)
+	}
+	if _, err := a.personaCmd([]string{"set", personas.Group, "backend", "claude"}); err != nil {
+		t.Fatalf("set backend claude: %v", err)
+	}
+	if p, _, _ := a.Store.GetPersona(personas.Group); p.Model != "sonnet" {
+		t.Fatalf("after claude: model=%q, want sonnet", p.Model)
+	}
+	// Re-setting the same backend keeps a hand-picked model.
+	if _, err := a.personaCmd([]string{"set", personas.Group, "model", "opus"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.personaCmd([]string{"set", personas.Group, "backend", "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	if p, _, _ := a.Store.GetPersona(personas.Group); p.Model != "opus" {
+		t.Fatalf("same backend reset the model to %q", p.Model)
 	}
 }

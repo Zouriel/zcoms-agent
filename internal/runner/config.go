@@ -1,6 +1,6 @@
 // Package agent is the shared zcoms toolkit used by the core daemon and every
 // component (bridge/triage/errands): config readers for the agent JSON files,
-// agent-backend selection, session listing, and the claude/codex runner. It is
+// agent-backend selection, session listing, and the claude/codex/agy runner. It is
 // pure Go (no TDLib/cgo) so components build and run as plain IPC clients.
 package runner
 
@@ -54,7 +54,7 @@ func MinRole(a, b Role) Role {
 type AllowEntry struct {
 	Role      Role     `json:"role"`
 	Locations []string `json:"locations"`       // location names, or ["*"] for all
-	Agent     Backend  `json:"agent,omitempty"` // "claude" (default) | "codex"
+	Agent     Backend  `json:"agent,omitempty"` // "claude" (default) | "codex" | "agy"
 
 	UserID int64 `json:"-"` // resolved from the @username at startup
 }

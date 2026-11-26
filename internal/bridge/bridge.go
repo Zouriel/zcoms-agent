@@ -30,7 +30,7 @@ type userState struct {
 	effectiveRole Role   // user role capped by the location's max_role
 	sessionID     string // active agent session ("" = will start fresh)
 	// sessionBackend is the CLI that issued sessionID. Session ids are not
-	// portable between claude and codex, so a resume is only valid on the same
+	// portable between claude, codex and agy, so a resume is only valid on the same
 	// backend; when the persona's backend changes under an open session the id is
 	// dropped and a fresh one starts.
 	sessionBackend Backend
@@ -390,7 +390,7 @@ func (d *Comp) runAgent(st *userState, prompt string, role Role, awaitConfirmAft
 		d.mu.Lock()
 		st.busy = false
 		d.mu.Unlock()
-		d.send(rt, "⚠️ Agent mode is unavailable — no `claude` or `codex` CLI is installed.")
+		d.send(rt, "⚠️ Agent mode is unavailable: no `claude`, `codex` or `agy` CLI is installed.")
 		return true // turn consumed (nothing to retry)
 	}
 
