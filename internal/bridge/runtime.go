@@ -76,6 +76,12 @@ func (d *Comp) brain(persona string, override Backend) Brain {
 // event router calls this for messages not claimed by an errand). Returns false
 // if the sender isn't allow-listed, so the router can fall through.
 func (d *Comp) HandleEvent(ev client.Event) bool {
+	// A group call is never a 1:1 conversation: the sender is a group member,
+	// not an allow-listed principal, and the reply target is the group. The
+	// groups handler owns these; the bridge must not open a session for one.
+	if ev.Group {
+		return false
+	}
 	st := d.stateFor(ev)
 	if st == nil {
 		// Not allow-listed: no immediate reply. The message is stored as unread;

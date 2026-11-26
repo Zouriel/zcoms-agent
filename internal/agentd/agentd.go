@@ -399,6 +399,12 @@ func (a *Agent) subscribe(ctx context.Context) {
 			if ev.FromSelf {
 				return
 			}
+			// Group calls never reach the 1:1 paths (bridge, errands,
+			// reminders, morning, lineup, reschedule).
+			if ev.Group {
+				a.handleGroupEvent(ev)
+				return
+			}
 			switch transportOf(ev) {
 			case "whatsapp":
 				// Daemon-delivered WhatsApp (whatsmeow): an errand-owned chat goes

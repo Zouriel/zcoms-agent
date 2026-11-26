@@ -160,3 +160,16 @@ func TestChatSessionRunsOnTheBridgePersona(t *testing.T) {
 		t.Fatalf("unscoped session resolved persona %q, want %q", asked[0], personas.Bridge)
 	}
 }
+
+// A group call from an allow-listed sender must never open a 1:1 session: the
+// bridge leaves Group events to the groups handler.
+func TestHandleEventIgnoresGroupCalls(t *testing.T) {
+	d := testComp()
+	ev := client.Event{Group: true, Sender: "@alice", UserID: 42, ChatID: -100, Address: "-100", Text: "hi", Call: "mention"}
+	if d.HandleEvent(ev) {
+		t.Fatal("bridge handled a group event")
+	}
+	if len(d.byUser) != 0 {
+		t.Fatalf("bridge opened %d session(s) for a group event", len(d.byUser))
+	}
+}
