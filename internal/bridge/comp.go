@@ -32,6 +32,8 @@ type Comp struct {
 	reminders  *reminders.Comp          // in-process reminder loop (may be nil)
 	errandCmd  func(text string) string // in-process errands command handler (may be nil)
 	phrase     func(key string) string  // editable canned messages (may be nil)
+	// projectNote is the bound-project guidance for a workspace (may be nil).
+	projectNote func(path string) string
 
 	mu       sync.Mutex
 	triageMu sync.Mutex

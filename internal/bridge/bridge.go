@@ -297,6 +297,11 @@ func (d *Comp) selectNumber(st *userState, n int) {
 		// prepended to the first turn in this repo.
 		st.persona = personas.Workspace
 		st.triageSeed = d.seed(personas.Workspace)
+		if d.projectNote != nil {
+			if note := d.projectNote(cfg.Path); note != "" {
+				st.triageSeed += "\n\n" + note
+			}
+		}
 		d.mu.Unlock()
 		d.send(st.route(), fmt.Sprintf("📍 %s (%s)\nRole here: %s\nSend 'resume' to continue a past session, or just send a message to start a new one.", name, cfg.Path, role))
 

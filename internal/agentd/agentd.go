@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Zouriel/zcoms-agent/internal/bootstrap"
@@ -22,6 +23,7 @@ import (
 	"github.com/Zouriel/zcoms-agent/internal/lineup"
 	"github.com/Zouriel/zcoms-agent/internal/morning"
 	"github.com/Zouriel/zcoms-agent/internal/personas"
+	"github.com/Zouriel/zcoms-agent/internal/projects"
 	"github.com/Zouriel/zcoms-agent/internal/reminders"
 	"github.com/Zouriel/zcoms-agent/internal/reschedule"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
@@ -47,6 +49,10 @@ type Agent struct {
 	Reschedule *reschedule.Comp
 	Lineup     *lineup.Comp
 	Groups     *groups.Handler
+	Projects   *projects.Service
+
+	standupMu   sync.Mutex
+	standupJobs map[int64]bool // projects with a registered standup job
 
 	// Owner is an owner-caller comms client. Only owner commands from
 	// agent.sock use it (group on/off, project init/remove/follow), because
@@ -195,6 +201,13 @@ func (a *Agent) buildRuntimes() error {
 			return a.Errands.HandleCommand(text)
 		},
 		Phrase: func(key string) string { return bridge.PhraseOr(a.Store, key) },
+		ProjectNote: func(path string) string {
+			p, ok, err := a.Store.ProjectForPath(path)
+			if err != nil || !ok {
+				return ""
+			}
+			return projects.SessionNote(p)
+		},
 	})
 	a.Errands = errands.New(a.Client, settings.WhatsApp.Enabled,
 		func(persona string) runner.Brain { return personas.Brain(a.Store, persona) },
@@ -202,8 +215,17 @@ func (a *Agent) buildRuntimes() error {
 
 	// Group calls: one fresh, tool-restricted turn per call on the group
 	// persona, replying only to the calling message in the calling group.
+	// Projects: owner commands use the owner client; the standup reads and
+	// posts as the agent. Its model passes run with no tools at all.
+	a.Projects = &projects.Service{
+		Store: a.Store, Owner: a.Owner, Agent: a.Client, Log: a.log,
+		Run: func(persona, dir, prompt string) (string, error) {
+			return a.runRestricted(groups.RunRequest{Persona: persona, Dir: dir, Prompt: personas.SeedOr(a.Store, persona) + "\n\n" + prompt})
+		},
+		OnFollow: a.scheduleStandup,
+	}
 	a.Groups = &groups.Handler{
-		Comms: a.Client, Policies: a.Store, Run: a.runRestricted,
+		Comms: a.Client, Policies: a.Store, Run: a.runRestricted, Projects: a.Projects,
 		Seed: seedFn, Scratch: groupScratch(), Log: a.log,
 	}
 
@@ -236,6 +258,7 @@ func (a *Agent) registerJobs() {
 	// enable/disable setting and spawns the session in its own goroutine, so a
 	// briefing parked on the owner's reply never blocks the scheduler tick.
 	a.Sched.DailyAt("morning-briefing", 6, 0, time.Local, a.Morning.Fire)
+	a.registerStandups()
 	a.Sched.Interval("workspace-discovery", 10*time.Minute, func() { _, _ = a.Registry.Sync() })
 }
 
@@ -544,7 +567,7 @@ func (a *Agent) handleConn(conn net.Conn) {
 	}
 	// A group call's shell must not drive the agent: no errands, reminders,
 	// project writes or group changes from inside a group run.
-	if peerInGroupCall(conn) {
+	if peerInGroupCall(conn) || store.CallerFrom(req.Actor) == store.Agent {
 		writeSock(conn, sockResponse{Error: "agent commands are not available from a group call"})
 		return
 	}

@@ -64,6 +64,8 @@ func (a *Agent) dispatch(text string) (string, error) {
 		return a.jsonQuery(rest)
 	case "group", "groups":
 		return a.groupCmd(text)
+	case "project", "projects":
+		return a.projectCmd(text)
 	default:
 		return "", fmt.Errorf("unknown command %q", verb)
 	}
@@ -118,6 +120,19 @@ func (a *Agent) jsonQuery(args []string) (string, error) {
 		// Which agent CLIs are installed here and what models each accepts, read
 		// from the CLIs themselves so the console offers real choices.
 		v = brains.List()
+	case "group-policies":
+		v, err = a.Store.ListGroupPolicies()
+	case "projects":
+		v, err = a.Store.ListProjects()
+	case "project":
+		if len(args) < 2 {
+			return "", fmt.Errorf("usage: json project <id>")
+		}
+		id, perr := strconv.ParseInt(args[1], 10, 64)
+		if perr != nil {
+			return "", perr
+		}
+		v, err = a.Projects.Detail(id)
 	case "settings":
 		v, err = a.Store.ListSettings()
 	case "sessions":

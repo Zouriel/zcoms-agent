@@ -10,6 +10,7 @@ import (
 	"github.com/Zouriel/zcoms-agent/internal/cmdline"
 	"github.com/Zouriel/zcoms-agent/internal/groups"
 	"github.com/Zouriel/zcoms-agent/internal/personas"
+	"github.com/Zouriel/zcoms-agent/internal/projects"
 	"github.com/Zouriel/zcoms-agent/internal/runner"
 	"github.com/Zouriel/zcoms-agent/internal/store"
 	"github.com/Zouriel/zcoms/client"
@@ -121,4 +122,48 @@ func (a *Agent) groupCmd(text string) (string, error) {
 		return fmt.Sprintf("On: I will answer when someone in %s mentions me or replies to me.", g.Name), nil
 	}
 	return fmt.Sprintf("Off: I will ignore %s.", g.Name), nil
+}
+
+// projectCmd runs a `project …` line from the CLI.
+func (a *Agent) projectCmd(text string) (string, error) {
+	words, err := cmdline.Split(text)
+	if err != nil {
+		return "", err
+	}
+	return a.Projects.Command(words[1:])
+}
+
+// scheduleStandup registers the 09:00 Indian/Maldives standup for a followed
+// project once per process. The job itself re-checks the binding and follow
+// state each day, so an unfollowed or removed project simply skips; the
+// scheduler's per-day guard and the standups table keep it to once a day.
+func (a *Agent) scheduleStandup(p store.Project) {
+	if !p.FollowTasks {
+		return
+	}
+	a.standupMu.Lock()
+	defer a.standupMu.Unlock()
+	if a.standupJobs == nil {
+		a.standupJobs = map[int64]bool{}
+	}
+	if a.standupJobs[p.ID] {
+		return
+	}
+	a.standupJobs[p.ID] = true
+	id := p.ID
+	a.Sched.DailyAt(fmt.Sprintf("project-standup-%d", id), 9, 0, projects.StandupZone(), func() {
+		go a.Projects.StandupByID(id)
+	})
+}
+
+// registerStandups schedules every followed project at start.
+func (a *Agent) registerStandups() {
+	ps, err := a.Store.ListProjects()
+	if err != nil {
+		a.log.Printf("projects: %v", err)
+		return
+	}
+	for _, p := range ps {
+		a.scheduleStandup(p)
+	}
 }

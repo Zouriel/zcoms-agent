@@ -36,6 +36,10 @@ type Deps struct {
 	// Phrase returns an editable canned message by key (override from agent.db,
 	// else the default), read live. May be nil (then the compiled default is used).
 	Phrase func(key string) string
+	// ProjectNote returns extra first-turn guidance for a workspace folder
+	// bound to a project group ("" when it is not bound), so progress
+	// updates the owner asks for go to the group via `zc project say`.
+	ProjectNote func(path string) string
 }
 
 // New builds the interactive bridge runtime for the unified agent process.
@@ -59,6 +63,7 @@ func New(d Deps) *Comp {
 		reminders:   d.Reminders,
 		errandCmd:   d.ErrandCmd,
 		phrase:      d.Phrase,
+		projectNote: d.ProjectNote,
 		byUser:      map[string]*userState{},
 	}
 }
