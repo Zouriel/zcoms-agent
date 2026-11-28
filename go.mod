@@ -4,7 +4,7 @@ go 1.25.11
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	github.com/Zouriel/zcoms v1.9.2
+	github.com/Zouriel/zcoms v1.10.0
 	modernc.org/sqlite v1.53.0
 )
 

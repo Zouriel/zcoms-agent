@@ -28,11 +28,15 @@ type Directives struct {
 	Pin       string // PIN: reply | quoted
 	Unpin     bool   // UNPIN: quoted
 	Edit      bool   // EDIT: last (or yes): replace my earlier message instead of posting
-	Disappear string // DISAPPEAR: 1d | 7d | 2w | off, as written
+	Delete    string // DELETE: last (my last answer) | quoted (the message replied to)
+	Disappear string // DISAPPEAR: <timer> [group]: the timer as written
+	// DisappearGroup is DISAPPEAR's "group" word: the whole group even when
+	// asked from inside a thread.
+	DisappearGroup bool
 }
 
 // SplitDirectives removes the directive lines (ATTACH, THREAD, PIN, UNPIN,
-// EDIT, DISAPPEAR) from a work-pass answer and returns the remaining reply
+// EDIT, DELETE, DISAPPEAR) from a work-pass answer and returns the remaining reply
 // text with them. A directive with a value it does not know is dropped.
 func SplitDirectives(out string) (string, Directives) {
 	var d Directives
@@ -66,9 +70,16 @@ func SplitDirectives(out string) (string, Directives) {
 				w := directiveWord(v)
 				d.Edit = d.Edit || w == "last" || w == "yes"
 				continue
+			case "DELETE":
+				if w := directiveWord(v); w == "last" || w == "quoted" {
+					d.Delete = w
+				}
+				continue
 			case "DISAPPEAR":
-				if w := directiveWord(v); w != "" && w != "none" {
-					d.Disappear = w
+				f := strings.Fields(strings.ToLower(v))
+				if len(f) > 0 && directiveWord(f[0]) != "none" {
+					d.Disappear = directiveWord(f[0])
+					d.DisappearGroup = len(f) > 1 && directiveWord(f[1]) == "group"
 				}
 				continue
 			}

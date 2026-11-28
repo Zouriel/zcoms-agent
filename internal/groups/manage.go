@@ -20,16 +20,20 @@ type Admin interface {
 	Unpin(to string, messageID int64) (client.Response, error)
 	SendKeep(to, text string, o client.KeepOptions) (client.Response, error)
 	SetDisappear(to string, timer time.Duration) (client.Response, error)
+	SetThreadDisappear(to, thread string, timer time.Duration) (client.Response, error)
 	Disappear(to string) (time.Duration, error)
+	Delete(to string, messageIDs ...int64) (client.Response, error)
 }
 
 // Notes appended to a reply when a management request is not carried out.
 const (
-	noteManageRole    = "(Only the owner or members with write access can have me pin, unpin or edit.)"
+	noteManageRole    = "(Only the owner or members with write access can have me pin, unpin, edit or delete my messages.)"
 	noteDisappearRole = "(Only the owner can change disappearing messages.)"
 	noteTelegramOnly  = "(Pinning, editing and disappearing messages work in Telegram groups only.)"
 	noteNoQuoted      = "(Reply to the message you want pinned or unpinned, then ask me.)"
 	noteNoEdit        = "(I could not find my earlier message to edit, so here it is again.)"
+	noteDeleteRole    = "(Only the owner can have me delete someone's message.)"
+	noteNoDelete      = "(I could not find my earlier message to delete.)"
 )
 
 // admin returns the comms client's management side, if it has one.
@@ -57,6 +61,15 @@ func (h *Handler) rememberReply(c Call, thread string, id int64) {
 	h.answers[replyKey(c, thread)] = id
 }
 
+// forgetReply drops a tracked answer that was deleted.
+func (h *Handler) forgetReply(c Call, thread string, id int64) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.answers[replyKey(c, thread)] == id {
+		delete(h.answers, replyKey(c, thread))
+	}
+}
+
 func (h *Handler) lastReply(c Call, thread string) int64 {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -75,7 +88,7 @@ func (h *Handler) canManage(c Call) bool {
 // from model output.
 func (h *Handler) manage(c Call, d Directives) []string {
 	quoted := d.Pin == "quoted" || d.Unpin
-	if !quoted && d.Disappear == "" {
+	if !quoted && d.Disappear == "" && d.Delete == "" {
 		return nil
 	}
 	adm, ok := h.admin()
@@ -105,21 +118,72 @@ func (h *Handler) manage(c Call, d Directives) []string {
 			}
 		}
 	}
+	if d.Delete != "" {
+		if n := h.deleteMessage(adm, c, d.Delete); n != "" {
+			notes = append(notes, n)
+		}
+	}
 	if d.Disappear != "" {
-		notes = append(notes, h.setDisappear(adm, c, d.Disappear))
+		notes = append(notes, h.setDisappear(adm, c, d.Disappear, d.DisappearGroup))
 	}
 	return notes
 }
 
-// setDisappear changes the group's timer for the owner and returns the note
-// confirming it: the model's reply never decides whether it happened.
-func (h *Handler) setDisappear(adm Admin, c Call, value string) string {
+// deleteMessage deletes my last answer in this chat and thread (owner or
+// write role), or the quoted message, which may be anyone's (owner only).
+// It returns a note when nothing was deleted.
+func (h *Handler) deleteMessage(adm Admin, c Call, which string) string {
+	var id int64
+	switch which {
+	case "quoted":
+		if !c.SenderIsOwner {
+			return noteDeleteRole
+		}
+		if id = parseID(c.ReplyToID); id == 0 {
+			return "(Reply to the message you want deleted, then ask me.)"
+		}
+	default:
+		if !h.canManage(c) {
+			return noteManageRole
+		}
+		if id = h.lastReply(c, c.ThreadID); id == 0 {
+			return noteNoDelete
+		}
+	}
+	if _, err := adm.Delete(c.GroupID, id); err != nil {
+		h.logf("group %s/%s: delete %d: %v", c.Transport, c.GroupID, id, err)
+		return "(I could not delete it: " + shortErr(err) + ".)"
+	}
+	if which == "last" {
+		h.forgetReply(c, c.ThreadID, id)
+	}
+	return ""
+}
+
+// setDisappear changes a timer for the owner and returns the note confirming
+// it: the model's reply never decides whether it happened. Asked inside a
+// thread it sets that thread's timer (which zcoms enforces, since Telegram
+// has one timer per chat), unless wholeGroup; otherwise the group's.
+func (h *Handler) setDisappear(adm Admin, c Call, value string, wholeGroup bool) string {
 	if !c.SenderIsOwner {
 		return noteDisappearRole
 	}
 	timer, err := parseTimer(value)
 	if err != nil {
 		return "(I did not change disappearing messages: " + err.Error() + ".)"
+	}
+	if c.ThreadID != "" && !wholeGroup {
+		if _, err := adm.SetThreadDisappear(c.GroupID, c.ThreadID, timer); err != nil {
+			h.logf("group %s/%s: thread %s disappear %s: %v", c.Transport, c.GroupID, c.ThreadID, value, err)
+			return "(I could not change disappearing messages for this thread: " + shortErr(err) + ".)"
+		}
+		if timer == 0 {
+			return "(Disappearing messages are off in this thread.)"
+		}
+		return fmt.Sprintf("(New messages in this thread only now disappear after %s. Pinned messages stay.)", timerLabel(timer))
+	}
+	if timer > 0 && timer%(24*time.Hour) != 0 {
+		return "(I did not change disappearing messages: for the whole group Telegram takes whole days, like 1d or 7d.)"
 	}
 	if _, err := adm.SetDisappear(c.GroupID, timer); err != nil {
 		h.logf("group %s/%s: disappear %s: %v", c.Transport, c.GroupID, value, err)
@@ -200,28 +264,32 @@ func parseID(s string) int64 {
 	return id
 }
 
-// parseTimer reads a DISAPPEAR value: off, or a number of days or weeks.
+// parseTimer reads a DISAPPEAR value: off, or a number of minutes, hours,
+// days or weeks (30m, 12h, 7d, 2w). The whole group takes days only.
 func parseTimer(v string) (time.Duration, error) {
 	v = strings.ToLower(strings.TrimSpace(v))
 	if v == "off" || v == "0" || v == "never" {
 		return 0, nil
 	}
-	day := 24 * time.Hour
-	if n := len(v); n > 1 && (v[n-1] == 'd' || v[n-1] == 'w') {
-		k, err := strconv.Atoi(v[:n-1])
-		if err == nil && k > 0 && k <= 366 {
-			if v[n-1] == 'w' {
-				return time.Duration(k) * 7 * day, nil
+	unit := map[byte]time.Duration{'m': time.Minute, 'h': time.Hour, 'd': 24 * time.Hour, 'w': 7 * 24 * time.Hour}
+	if n := len(v); n > 1 {
+		if u, ok := unit[v[n-1]]; ok {
+			k, err := strconv.Atoi(v[:n-1])
+			if d := time.Duration(k) * u; err == nil && k > 0 && d <= 366*24*time.Hour {
+				return d, nil
 			}
-			return time.Duration(k) * day, nil
 		}
 	}
-	return 0, fmt.Errorf("%q is not a timer like 1d, 7d, 2w or off", v)
+	return 0, fmt.Errorf("%q is not a timer like 30m, 12h, 7d, 2w or off", v)
 }
 
 func timerLabel(d time.Duration) string {
 	day := 24 * time.Hour
 	switch {
+	case d < time.Hour:
+		return plural(int64(d/time.Minute), "minute")
+	case d < day:
+		return plural(int64(d/time.Hour), "hour")
 	case d%(7*day) == 0 && d/(7*day) == 1:
 		return "1 week"
 	case d%(7*day) == 0:
@@ -239,4 +307,11 @@ func shortErr(err error) string {
 		s = s[i+2:]
 	}
 	return strings.TrimSpace(strings.SplitN(s, "\n", 2)[0])
+}
+
+func plural(n int64, unit string) string {
+	if n == 1 {
+		return "1 " + unit
+	}
+	return fmt.Sprintf("%d %ss", n, unit)
 }
