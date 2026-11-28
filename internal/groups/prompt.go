@@ -82,7 +82,7 @@ func UnderstandPrompt(seed string, c Call, window []client.GroupMessage) string 
 	b.WriteString("TASK: <what they want, restated in English as one self-contained question or request>\n")
 	b.WriteString("LANG: <the language they wrote in>\n")
 	b.WriteString("WORK: quick or long (long when answering needs research, an investigation, reading code, running commands or making changes; quick when you could answer from what you already know)\n")
-	b.WriteString("CHANGES: yes or no (yes only when they ask you to change something: edit, fix or create files or code, commit, push, open or update a pull request, or run anything that modifies a system; reading, checking, investigating or explaining is no)\n")
+	b.WriteString("CHANGES: yes or no (yes only when they ask you to change something: edit, fix or create files or code, commit, push, open or update a pull request, or run anything that modifies a system; reading, checking, investigating or explaining is no; pinning, unpinning or editing chat messages, or turning disappearing messages on or off, is also no)\n")
 	b.WriteString("ACK: <only when WORK is long: one short line to the asker, in the language they wrote in, saying you are on it and what you will do first; no promises about timing>\n")
 	b.WriteString("If they are not asking for anything, write NONE: <a few words on what they said> instead of TASK, WORK, CHANGES and ACK.\n")
 	return b.String()
@@ -190,6 +190,7 @@ func BuildPrompt(seed string, c Call, task, lang string, window []client.GroupMe
 	b.WriteString("Write only your reply, in English, nothing else.\n")
 	b.WriteString("If the caller asked for a thread (a separate topic) for this, add one line THREAD: <short name for it>; " +
 		"code starts it in this group and posts your reply there. Otherwise do not write a THREAD line.")
+	b.WriteString(manageNote)
 	return b.String()
 }
 
@@ -294,3 +295,13 @@ func oneLine(s string) string {
 	}
 	return s
 }
+
+// manageNote teaches the work pass the management directives. Code decides
+// whether each one happens (by the caller's role) and adds its own note, so
+// the reply must not claim the outcome.
+const manageNote = "\nOnly when the caller asks for it, add one of these lines (code checks who may and confirms the result, so never say it is done yourself):\n" +
+	"PIN: reply (pin your answer; it is posted so it never disappears), or PIN: quoted (pin the message they replied to)\n" +
+	"UNPIN: quoted (unpin the message they replied to)\n" +
+	"EDIT: last (they want your previous message corrected: write the full corrected message as your reply, and code replaces your earlier one with it)\n" +
+	"DISAPPEAR: <1d, 7d, 2w or off> (turn disappearing messages on or off for this whole group; threads cannot have their own timer)\n" +
+	"Otherwise write none of these lines."

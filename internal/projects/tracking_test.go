@@ -29,6 +29,12 @@ type fakeOwner struct {
 
 type ownerSend struct {
 	transport, to, text, file, thread string
+	pinned                            bool
+}
+
+func (f *fakeOwner) SendKeep(to, text string, o client.KeepOptions) (client.Response, error) {
+	f.sends = append(f.sends, ownerSend{transport: "telegram", to: to, text: text, thread: o.Thread, pinned: o.Pin})
+	return client.Response{OK: true}, nil
 }
 
 func (f *fakeOwner) SendWith(transport, to, text string, o client.SendOptions) (client.Response, error) {

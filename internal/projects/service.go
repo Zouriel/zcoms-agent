@@ -31,6 +31,8 @@ type OwnerComms interface {
 	TopicList(transport, group string) ([]client.Topic, error)
 	TopicCreate(transport, group, name string) (*client.Topic, error)
 	ListContacts() ([]client.Contact, error)
+	// SendKeep sends a Telegram message that never disappears, pinned when asked.
+	SendKeep(to, text string, o client.KeepOptions) (client.Response, error)
 }
 
 // AgentComms is the agent-caller comms client the standup uses; the daemon
@@ -148,7 +150,9 @@ func (s *Service) Command(words []string) (string, error) {
 	case "sync":
 		return s.sync(p)
 	case "say":
-		return s.say(p, SayOpts{Text: strings.Join(a.Pos, " "), Thread: a.Flags["thread"], Files: a.All["file"]})
+		// zc sends --pin=true, so Flags carries it whatever the parse switches.
+		pin := a.Flags["pin"] == "true"
+		return s.say(p, SayOpts{Text: strings.Join(a.Pos, " "), Thread: a.Flags["thread"], Files: a.All["file"], Pin: pin})
 	default:
 		return "", fmt.Errorf("unknown project command %q", sub)
 	}

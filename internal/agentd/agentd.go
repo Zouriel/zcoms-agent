@@ -598,3 +598,7 @@ func writeSock(conn net.Conn, resp sockResponse) {
 	b, _ := json.Marshal(resp)
 	_, _ = conn.Write(append(b, '\n'))
 }
+
+// The comms client is the groups' Admin: the handler finds it by type
+// assertion, so this keeps a contract change from silently disabling it.
+var _ groups.Admin = (*client.Client)(nil)

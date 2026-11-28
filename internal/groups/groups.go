@@ -228,6 +228,8 @@ type Handler struct {
 	mu     sync.Mutex
 	stamps map[string][]time.Time // admitted calls per group, last hour
 	topics topicLimiter           // new threads per group, last hour
+	// answers is my last posted answer per chat and thread, for EDIT.
+	answers map[string]int64
 
 	semOnce sync.Once
 	sem     chan struct{}
@@ -398,17 +400,35 @@ func (h *Handler) deliver(c Call, a answered, outbox string) {
 	for _, s := range skipped {
 		h.logf("group %s/%s: call %s: attachment %q skipped: %s", c.Transport, c.GroupID, c.MsgID, s.Path, s.Reason)
 	}
-	text := a.Text
+	d := a.Directives
+	notes := h.manage(c, d)
+	pin, edit := d.Pin == "reply", d.Edit
+	if (pin || edit) && !h.canManage(c) {
+		pin, edit = false, false
+		notes = appendOnce(notes, noteManageRole)
+	}
+	// EDIT replaces my earlier answer in place; only a plain text answer can.
+	if edit && len(files) == 0 && d.Thread == "" {
+		if h.editInstead(c, a.Text) {
+			h.reply(c, withNotes("Edited.", notes))
+			return
+		}
+		notes = append(notes, noteNoEdit)
+	}
+	text := withNotes(a.Text, notes)
 	// A call made inside a thread is answered there; it never starts another.
-	if name := a.Directives.Thread; name != "" && c.ThreadID == "" {
+	if name := d.Thread; name != "" && c.ThreadID == "" {
 		tid, note := h.startThread(c, name)
 		if tid != "" {
-			first := text
-			if _, err := h.Comms.SendWith(c.Transport, c.GroupID, first, client.SendOptions{Thread: tid}); err != nil {
+			extra, err := h.post(c, text, tid, "", pin)
+			if err != nil {
 				h.logf("group %s/%s: send in new thread failed: %v", c.Transport, c.GroupID, err)
 				h.reply(c, text)
 				h.sendFiles(c, files, c.ThreadID, c.MsgID)
 				return
+			}
+			if extra != "" {
+				h.logIf(c, h.note(c, tid, extra))
 			}
 			h.reply(c, fmt.Sprintf("I started a thread for this: %s.", name))
 			h.sendFiles(c, files, tid, "")
@@ -416,8 +436,37 @@ func (h *Handler) deliver(c Call, a answered, outbox string) {
 		}
 		text = strings.TrimSpace(text + " " + note)
 	}
-	h.reply(c, text)
+	extra, err := h.post(c, text, c.ThreadID, c.MsgID, pin)
+	switch {
+	case err != nil:
+		h.logf("group %s/%s: send failed: %v", c.Transport, c.GroupID, err)
+	case extra != "":
+		h.logIf(c, h.note(c, c.ThreadID, extra))
+	}
 	h.sendFiles(c, files, c.ThreadID, c.MsgID)
+}
+
+// withNotes appends code-written notes to a reply.
+func withNotes(text string, notes []string) string {
+	if len(notes) == 0 {
+		return text
+	}
+	return strings.TrimSpace(text + "\n\n" + strings.Join(notes, " "))
+}
+
+func appendOnce(list []string, s string) []string {
+	for _, v := range list {
+		if v == s {
+			return list
+		}
+	}
+	return append(list, s)
+}
+
+func (h *Handler) logIf(c Call, err error) {
+	if err != nil {
+		h.logf("group %s/%s: note failed: %v", c.Transport, c.GroupID, err)
+	}
 }
 
 // startThread creates one thread named name in the calling group. It returns

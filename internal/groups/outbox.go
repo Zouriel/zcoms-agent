@@ -22,10 +22,18 @@ const (
 type Directives struct {
 	Attach []string // ATTACH: <path> lines, in order
 	Thread string   // the first THREAD: <name> line
+
+	// Message and group management (Telegram), each gated in code by the
+	// caller's role before anything happens.
+	Pin       string // PIN: reply | quoted
+	Unpin     bool   // UNPIN: quoted
+	Edit      bool   // EDIT: last (or yes): replace my earlier message instead of posting
+	Disappear string // DISAPPEAR: 1d | 7d | 2w | off, as written
 }
 
-// SplitDirectives removes ATTACH: and THREAD: lines from a work-pass answer
-// and returns the remaining reply text with them.
+// SplitDirectives removes the directive lines (ATTACH, THREAD, PIN, UNPIN,
+// EDIT, DISAPPEAR) from a work-pass answer and returns the remaining reply
+// text with them. A directive with a value it does not know is dropped.
 func SplitDirectives(out string) (string, Directives) {
 	var d Directives
 	var keep []string
@@ -43,11 +51,36 @@ func SplitDirectives(out string) (string, Directives) {
 					d.Thread = cleanThreadName(v)
 				}
 				continue
+			case "PIN":
+				switch w := directiveWord(v); w {
+				case "reply", "quoted":
+					d.Pin = w
+				case "this", "yes":
+					d.Pin = "reply"
+				}
+				continue
+			case "UNPIN":
+				d.Unpin = d.Unpin || directiveWord(v) == "quoted"
+				continue
+			case "EDIT":
+				w := directiveWord(v)
+				d.Edit = d.Edit || w == "last" || w == "yes"
+				continue
+			case "DISAPPEAR":
+				if w := directiveWord(v); w != "" && w != "none" {
+					d.Disappear = w
+				}
+				continue
 			}
 		}
 		keep = append(keep, line)
 	}
 	return strings.TrimSpace(strings.Join(keep, "\n")), d
+}
+
+// directiveWord is a directive's value as one lower-case word.
+func directiveWord(v string) string {
+	return strings.ToLower(strings.Trim(strings.TrimSpace(v), "`\"'<>."))
 }
 
 // cleanThreadName makes a model-proposed thread name safe to use as a topic

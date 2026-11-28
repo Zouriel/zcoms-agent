@@ -16,11 +16,13 @@ import (
 const MaxSayFileBytes = 20 << 20
 
 // SayOpts is one `project say`: text, an optional thread (topic name or id)
-// and files (absolute paths; photos go as photos).
+// and files (absolute paths; photos go as photos). Pin pins a text update and
+// keeps it from disappearing (Telegram).
 type SayOpts struct {
 	Text   string
 	Thread string
 	Files  []string
+	Pin    bool
 }
 
 // say posts to the project's group. It runs only for owner commands; the
@@ -60,10 +62,11 @@ func (s *Service) say(p store.Project, o SayOpts) (string, error) {
 		if len(o.Files) > 0 {
 			return s.sayToOwner(p, o, threadErr)
 		}
-		if _, err := s.Owner.SendWith(p.Transport, p.NativeID, o.Text, client.SendOptions{}); err != nil {
+		pinNote, err := s.sendText(p, o, "")
+		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Sent to the main chat of %q (no thread: %v). Keep main-chat posts to milestones.", p.GroupName, threadErr), nil
+		return fmt.Sprintf("Sent to the main chat of %q (no thread: %v). Keep main-chat posts to milestones.%s", p.GroupName, threadErr, pinNote), nil
 	}
 
 	where := fmt.Sprintf("%q", p.GroupName)
@@ -72,10 +75,11 @@ func (s *Service) say(p store.Project, o SayOpts) (string, error) {
 	}
 	opts := client.SendOptions{Thread: thread}
 	if len(o.Files) == 0 {
-		if _, err := s.Owner.SendWith(p.Transport, p.NativeID, o.Text, opts); err != nil {
+		pinNote, err := s.sendText(p, o, thread)
+		if err != nil {
 			return "", err
 		}
-		return "Sent to " + where + "." + note, nil
+		return "Sent to " + where + "." + note + pinNote, nil
 	}
 	if err := s.sendFiles(p.Transport, p.NativeID, o.Files, o.Text, opts); err != nil {
 		return "", err
@@ -172,4 +176,23 @@ func checkSayFile(f string) error {
 		return fmt.Errorf("%s is over 20 MB", f)
 	}
 	return nil
+}
+
+// sendText posts a text update in thread ("" = main chat). With Pin on
+// Telegram it is sent outside any disappearing timer and pinned; on WhatsApp,
+// which has no pins, it is sent plainly and the returned note says so.
+func (s *Service) sendText(p store.Project, o SayOpts, thread string) (string, error) {
+	if o.Pin && p.Transport != "whatsapp" {
+		if _, err := s.Owner.SendKeep(p.NativeID, o.Text, client.KeepOptions{Thread: thread, Pin: true, Silent: true}); err != nil {
+			return "", err
+		}
+		return " Pinned; it will not disappear.", nil
+	}
+	if _, err := s.Owner.SendWith(p.Transport, p.NativeID, o.Text, client.SendOptions{Thread: thread}); err != nil {
+		return "", err
+	}
+	if o.Pin {
+		return " (Not pinned: WhatsApp has no pins here.)", nil
+	}
+	return "", nil
 }

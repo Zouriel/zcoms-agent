@@ -177,3 +177,28 @@ func TestSayFilesWithoutThreadGoToUpdatesThread(t *testing.T) {
 		t.Fatal("block does not name the updates thread")
 	}
 }
+
+// --pin=true (as zc sends it) pins a text update through SendKeep, in the
+// thread when one is named.
+func TestSayPin(t *testing.T) {
+	s, fo, dest := boundProject(t)
+	out, err := s.Command(sayWords(t, `project say --path `+dest+` --pin=true --thread Misc "status: green"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fo.sends) != 1 || !fo.sends[0].pinned || fo.sends[0].text != "status: green" || fo.sends[0].thread == "" {
+		t.Fatalf("sends = %+v", fo.sends)
+	}
+	if !strings.Contains(out, "Pinned") {
+		t.Fatalf("out = %q", out)
+	}
+
+	// Without --pin nothing is pinned.
+	fo.sends = nil
+	if _, err := s.Command(sayWords(t, `project say --path `+dest+` done`)); err != nil {
+		t.Fatal(err)
+	}
+	if fo.sends[0].pinned {
+		t.Fatalf("plain say pinned: %+v", fo.sends[0])
+	}
+}
